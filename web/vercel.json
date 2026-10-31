@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "src/app/api/run/route.ts": { "maxDuration": 300 },
+    "src/app/api/explore/ai/route.ts": { "maxDuration": 300 },
+    "src/app/api/apply/prefill/route.ts": { "maxDuration": 300 }
+  }
+}
