@@ -22,6 +22,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Binary, MongoClient } from "mongodb";
+import { isMainModule } from "../../lib/is-main-module.mjs";
+import { listTree } from "../../lib/walk-tree.mjs";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ROOT = process.env.CAREER_OPS_ROOT ? path.resolve(process.env.CAREER_OPS_ROOT) : path.dirname(WEB);
@@ -46,16 +48,14 @@ export function isReplayable(cmd) {
 
 function listFiles() {
   const out = [];
-  const walk = (rel) => {
-    const abs = path.join(ROOT, rel);
-    if (!fs.existsSync(abs)) return;
-    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
-      const r = `${rel}/${e.name}`;
-      if (e.isDirectory()) walk(r);
-      else if (e.isFile() && !SKIP.test(r)) out.push(r);
+  for (const dir of SYNC_DIRS) {
+    const abs = path.join(ROOT, dir);
+    if (!fs.existsSync(abs)) continue;
+    for (const file of listTree(abs)) {
+      const r = path.relative(ROOT, file).split(path.sep).join("/");
+      if (!SKIP.test(r)) out.push(r);
     }
-  };
-  SYNC_DIRS.forEach(walk);
+  }
   for (const f of SYNC_FILES) if (fs.existsSync(path.join(ROOT, f))) out.push(f);
   return out;
 }
@@ -195,7 +195,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   main().catch((e) => {
     // A driver error can echo the URI; never let it reach the log.
     console.error(`${new Date().toISOString()} worker failed: ${String(e?.message ?? e).replace(/mongodb(\+srv)?:\/\/[^\s]*/g, "mongodb://***")}`);

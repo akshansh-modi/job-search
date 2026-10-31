@@ -28,7 +28,8 @@ import { readJsonObject } from "@/lib/json-body";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 import { createTagEnvelopeFilter } from "@/lib/tag-envelope.mjs";
 import { LATEX_TAG, buildLatexPrompt, persistLatexCv, resolveLatexPaths } from "@/lib/latex-cv.mjs";
-import { EMAIL_TAG, buildEmailPrompt, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
+import { EMAIL_TAG, buildEmailPrompt, findAttachment, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
+import { buildChromeFillPrompt, postingUrlForReport } from "@/lib/chrome-fill.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -116,7 +117,7 @@ export async function POST(req: Request) {
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf" || kind === "cover" || kind === "latex-cv" || kind === "email-draft") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+  if ((kind === "evaluate" || kind === "pdf" || kind === "cover" || kind === "latex-cv" || kind === "email-draft" || kind === "chrome-fill") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
     return new Response(
       JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
@@ -163,6 +164,24 @@ export async function POST(req: Request) {
     }
   }
 
+  // chrome-fill acts in the user's own Chrome through Claude in Chrome: Claude only.
+  let chromeFillPrompt = "";
+  if (kind === "chrome-fill") {
+    if (cliId !== "claude") return bad("Filling in your Chrome needs Claude Code (Claude in Chrome). Pick Claude in Config.");
+    const abs = findReportFile(input);
+    if (!abs) return bad(`No evaluation report found for application #${input}.`);
+    const url = postingUrlForReport(abs);
+    if (!url) return bad("The report has no posting URL to open.");
+    const out = resolveEmailPaths(careerOpsRoot(), abs);
+    chromeFillPrompt = buildChromeFillPrompt({
+      n: input,
+      url,
+      reportFile: path.relative(careerOpsRoot(), abs),
+      cvPdf: out.ok ? findAttachment(out.paths.dir) : null,
+      profile: profileRef(careerOpsRoot()),
+    });
+  }
+
   const coverRequest = kind === "cover" ? parseCoverRequest({ input, brief, root: careerOpsRoot(), findReportFile }) : undefined;
   if (coverRequest && !coverRequest.ok) {
     return new Response(JSON.stringify({ error: coverRequest.error }), {
@@ -188,7 +207,9 @@ export async function POST(req: Request) {
   // The root is passed, not re-derived: a relative CAREER_OPS_PROFILE resolves
   // against it, and `process.cwd()` here is `<core>/web` (see cv-template.mjs).
   const cvTemplate = kind === "pdf" ? await resolveCvTemplate(careerOpsRoot()) : undefined;
-  const prompt = latexPaths?.ok
+  const prompt = chromeFillPrompt
+    ? chromeFillPrompt
+    : latexPaths?.ok
     ? buildLatexPrompt({ n: input, reportFile: tagReportFile, baseTexContent: fs.readFileSync(/* turbopackIgnore: true */ latexPaths.paths.baseTex, "utf8"), profile: profileRef(careerOpsRoot()), memory: readMemory() })
     : emailBrief?.ok
     ? buildEmailPrompt({ n: input, reportFile: tagReportFile, brief: emailBrief.brief, profile: profileRef(careerOpsRoot()) })

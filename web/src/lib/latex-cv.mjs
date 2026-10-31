@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { tagEnvelopeInstruction } from "./tag-envelope.mjs";
+import { getProfilePath } from "./core/profile-path.mjs";
 
 export const LATEX_TAG = "cv-tex";
 
@@ -42,7 +43,7 @@ export function resolveLatexPaths(root, reportFile) {
 
   let profile = {};
   try {
-    profile = yaml.load(fs.readFileSync(path.join(root, "config/profile.yml"), "utf8")) ?? {};
+    profile = yaml.load(fs.readFileSync(getProfilePath(root), "utf8")) ?? {};
   } catch {
     return { ok: false, error: "Could not read config/profile.yml." };
   }

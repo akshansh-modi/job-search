@@ -68,7 +68,7 @@ export const CAPS = Object.freeze({
  * Lives here rather than in claude-invocation.mjs because it is a fact about the
  * run route's workers, not about Claude. Re-exported there for existing importers.
  */
-export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-portal", "cover", "latex-cv", "email-draft"]);
+export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-portal", "cover", "latex-cv", "email-draft", "chrome-fill"]);
 
 /**
  * What each run-route kind needs. Derived from what its prompt actually does
@@ -97,6 +97,9 @@ const KIND_CAPABILITIES = Object.freeze({
   // latex-cv / email-draft read local files and return text in an envelope; the backend writes.
   "latex-cv": CAPS.localReadOnly,
   "email-draft": CAPS.localReadOnly,
+  // chrome-fill: no native write or fetch tool; it acts only through the Claude in
+  // Chrome tools claude-invocation.mjs grants it (and never submits, by prompt).
+  "chrome-fill": CAPS.localReadOnly,
 });
 
 /**
