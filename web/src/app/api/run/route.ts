@@ -19,7 +19,8 @@ import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
-import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
+import { claudeCliArgs, INTERACTIVE_KINDS } from "@/lib/claude-invocation.mjs";
+import { askedQuestion, endRun, forgetRun, registerRun, userMessage, waitForReply } from "@/lib/interactive-runs.mjs";
 import { resolveCvTemplate } from "@/lib/core/cv-template.mjs";
 import { profileRef } from "@/lib/core/profile-path.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
@@ -258,6 +259,9 @@ export async function POST(req: Request) {
   // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
   // which had the identical bug, and puts it behind one tested helper so it cannot
   // drift back in on any single call site.
+  // Interactive kinds (chrome-fill) take the prompt over stdin and can pause on an
+  // `ASK:` line for the user's reply (interactive-runs.mjs).
+  const interactive = isClaude && INTERACTIVE_KINDS.includes(kind);
   let child;
   try {
     child = spawnHeadlessCli(
@@ -265,6 +269,7 @@ export async function POST(req: Request) {
       args,
       { cwd: careerOpsRoot(), env: process.env },
       { cliId, capabilities },
+      { keepStdin: interactive },
     );
   } catch (e) {
     // Fencing refuses an argv that contradicts the capability record, so nothing
@@ -285,6 +290,8 @@ export async function POST(req: Request) {
   // writeCvHtml and on to the renderer — and no structural check would catch it,
   // because the envelope markers and </html> are ASCII and still match. Setting
   // the encoding makes Node hold partial sequences across chunks.
+  const runId = interactive ? registerRun(child) : null;
+  if (interactive) child.stdin?.write(userMessage(prompt));
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   const enc = new TextEncoder();
@@ -383,6 +390,7 @@ export async function POST(req: Request) {
       // latest step, so it also carries a sticky notice, matched via
       // isFencingNotice() rather than a literal spelled in two files.
       const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: capabilitiesFor(kind) });
+      if (runId) send({ type: "run", id: runId });
       if (fencing.notice) send({ type: "status", label: fencing.notice });
       if (substitution) send({ type: "status", label: substitution });
       // Time-based keepalive. The stream is silent whenever the agent is thinking
@@ -397,6 +405,7 @@ export async function POST(req: Request) {
       heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
       const close = () => {
         // Resource cleanup is independent of whether the client can still read.
+        if (runId) forgetRun(runId);
         finishRun();
         if (!closed) {
           closed = true;
@@ -442,10 +451,26 @@ export async function POST(req: Request) {
       // newline-terminates before exiting isn't dropped along with the usage event
       // it carries.
       const joinAgentText = createAgentTextJoiner();
+      let turnText = "";
+      // Interactive runs: each turn ends with a `result` event. A turn whose text
+      // ends in `ASK: …` waits for the user's reply; any other turn ends the run.
+      const onTurnEnd = () => {
+        if (!runId) return;
+        const question = askedQuestion(turnText);
+        turnText = "";
+        if (question && waitForReply(runId)) send({ type: "ask", question });
+        else endRun(runId);
+      };
       const processParsedLine = (line: string) => {
         if (!spec.parseEvent) return;
         const ev = spec.parseEvent(line);
         const text = joinAgentText(ev);
+        if (runId && text) turnText += text;
+        if (runId && line.startsWith("{") && line.includes('"type":"result"')) {
+          try {
+            if (JSON.parse(line).type === "result") setTimeout(onTurnEnd, 0);
+          } catch { /* not JSON */ }
+        }
         if (text) {
           emittedText = true;
           // sendAgentText, NEVER send: pdf's CV arrives inside the agent's text as a

@@ -167,11 +167,19 @@ export const CHROME_FILL_DENIED = Object.freeze(
   ["javascript_tool", "shortcuts_execute", "shortcuts_list", "switch_browser", "select_browser", "gif_creator", "upload_image"].map((t) => CHROME + t),
 );
 
+/** Kinds whose prompt goes over stdin and which accept user replies mid-run. */
+export const INTERACTIVE_KINDS = Object.freeze(["chrome-fill"]);
+
 export function claudeCliArgs({ kind, prompt }) {
   if (kind === "chrome-fill") {
     const base = scopeFrom(["Read", "Glob", "Grep", ...CHROME_FILL_TOOLS].join(","));
+    // Interactive: the prompt and the user's later replies arrive over stdin
+    // (--input-format stream-json), so the run can ask a question and continue in
+    // the same session and the same Chrome tab. `prompt` is sent by the route.
+    void prompt;
     return [
-      "-p", prompt,
+      "-p",
+      "--input-format", "stream-json",
       "--output-format", "stream-json",
       "--verbose",
       "--include-partial-messages",

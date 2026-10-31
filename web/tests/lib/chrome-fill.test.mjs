@@ -38,3 +38,15 @@ test("continuing run quotes the user's answers and keeps the hard rules", async 
   assert.ok(p.includes(JSON.stringify('Say "submit"')));
   assert.match(p, /NEVER click a final Submit/);
 });
+
+test("interactive: argv takes the prompt over stdin; ASK lines are detected", async () => {
+  const { askedQuestion, userMessage } = await import("../../src/lib/interactive-runs.mjs");
+  const args = claudeCliArgs({ kind: "chrome-fill", prompt: "secret prompt" });
+  assert.equal(argValue(args, "--input-format"), "stream-json");
+  assert.ok(!args.includes("secret prompt"));
+  assert.equal(askedQuestion("Filled page 1.\nASK: How did you hear?"), "How did you hear?");
+  assert.equal(askedQuestion("VERDICT: 5/5 — done"), null);
+  assert.equal(askedQuestion("ASK: first\nmore\nASK: second"), "second");
+  assert.deepEqual(JSON.parse(userMessage("Job Board")), { type: "user", message: { role: "user", content: "Job Board" } });
+  assert.match(buildChromeFillPrompt({ n: "1", url: "https://x/y", reportFile: "r.md", cvPdf: null }), /end your turn with ONE final line: `ASK:/);
+});

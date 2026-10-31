@@ -440,6 +440,7 @@ export function newCompletedReportNum(beforeEntries, afterEntries) {
 export const RUN_MAX_DURATION_S = 800;
 export function killMsForKind(kind) {
   if (kind === "pdf" || kind === "latex-cv") return 600_000;
+  if (kind === "chrome-fill") return 60 * 60_000; // interactive: includes time waiting for the user's replies
   if (kind === "evaluate") return 740_000;
   return 780_000;
 }

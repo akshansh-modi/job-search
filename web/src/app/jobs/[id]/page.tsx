@@ -8,6 +8,7 @@ import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
+import { JobReply } from "@/components/jobs/job-reply";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -55,6 +56,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           )}
         </div>
       </section>
+
+      <JobReply job={job} />
 
       <ol className="mt-6 space-y-2">
         {job.steps.map((s, i) => (
