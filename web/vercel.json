@@ -1,3 +1,3 @@
 {
-  "buildCommand": "node -e \"const fs=require('fs');for(const f of ['src/app/api/run/route.ts','src/app/api/explore/ai/route.ts','src/app/api/apply/prefill/route.ts']){fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(/export const maxDuration = \\d+/,'export const maxDuration = 300'))}\" && next build"
+  "buildCommand": "node scripts/vercel-build.mjs && next build"
 }
