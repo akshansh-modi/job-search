@@ -10,6 +10,18 @@ import { useApply } from "@/components/apply/apply-provider";
 // for THIS offer is ready (the tracker's PDF column is ✅, or a pdf worker for
 // this #n just finished). On click it opens the apply form-proxy for the offer
 // (where the user reviews and submits it themselves — never auto-submit).
+// Account-gated or unsupported by the form reader: its Playwright browser has none
+// of the user's logins, so open these as a tab in the user's own (logged-in) browser.
+const OPEN_IN_OWN_BROWSER = /(^|\.)(myworkdayjobs\.com|linkedin\.com|naukri\.com|indeed\.com|instahyre\.com|wellfound\.com|foundit\.in)$/i;
+
+function opensInOwnBrowser(url: string): boolean {
+  try {
+    return OPEN_IN_OWN_BROWSER.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function ApplyButton({
   n,
   url,
@@ -47,6 +59,10 @@ export function ApplyButton({
     <button
       type="button"
       onClick={() => {
+        if (opensInOwnBrowser(url!)) {
+          window.open(url!, "_blank", "noopener,noreferrer");
+          return;
+        }
         // n + from ride along so the Apply page can mark this row Applied,
         // return the user to the page they left, and resolve THIS report's own
         // tailored CV rather than the newest one for the company. Read straight
