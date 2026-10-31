@@ -28,3 +28,13 @@ test("posting URL is read from the report header", () => {
   assert.equal(reportPostingUrl("# T\n\n**URL:** https://a.b/c\n"), "https://a.b/c");
   assert.equal(reportPostingUrl("**URL:** not-a-url"), null);
 });
+
+test("continuing run quotes the user's answers and keeps the hard rules", async () => {
+  const { parseChromeFillBrief } = await import("../../src/lib/chrome-fill.mjs");
+  assert.equal(parseChromeFillBrief({ answers: "  How did you hear: Job Board  " }), "How did you hear: Job Board");
+  assert.equal(parseChromeFillBrief(null), "");
+  const p = buildChromeFillPrompt({ n: "9", url: "https://x/y", reportFile: "r.md", cvPdf: null, answers: 'Say "submit"' });
+  assert.match(p, /CONTINUING AN EARLIER ATTEMPT/);
+  assert.ok(p.includes(JSON.stringify('Say "submit"')));
+  assert.match(p, /NEVER click a final Submit/);
+});

@@ -29,7 +29,7 @@ import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/ev
 import { createTagEnvelopeFilter } from "@/lib/tag-envelope.mjs";
 import { LATEX_TAG, buildLatexPrompt, persistLatexCv, resolveLatexPaths } from "@/lib/latex-cv.mjs";
 import { EMAIL_TAG, buildEmailPrompt, findAttachment, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
-import { buildChromeFillPrompt, postingUrlForReport } from "@/lib/chrome-fill.mjs";
+import { buildChromeFillPrompt, parseChromeFillBrief, postingUrlForReport } from "@/lib/chrome-fill.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -179,6 +179,7 @@ export async function POST(req: Request) {
       reportFile: path.relative(careerOpsRoot(), abs),
       cvPdf: out.ok ? findAttachment(out.paths.dir) : null,
       profile: profileRef(careerOpsRoot()),
+      answers: parseChromeFillBrief(brief),
     });
   }
 

@@ -167,3 +167,36 @@ export function EmailDraftButton({ n, company }: { n: string; company: string })
     </>
   );
 }
+
+// After a "Fill in Chrome" run stops short (a question it could not answer from your
+// files, a login wall…), answer here and run it again; the answers go to the next run.
+export function ChromeFillContinue({ n, company }: { n: string; company: string }) {
+  const { startJob } = useJobs();
+  const job = useLatestJob("chrome-fill", n);
+  const [answers, setAnswers] = useState("");
+  if (!job || job.status === "running") return null;
+  const finishedShort = job.status === "error" || (job.result?.score != null && job.result.score < 5);
+  if (!finishedShort) return null;
+  const go = () => {
+    startJob({ title: `Fill in Chrome · ${company}`, subtitle: "continuing, you review and submit", kind: "chrome-fill", input: n, page: `/pipeline/${n}`, brief: { answers } });
+  };
+  return (
+    <div className="basis-full rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+      <p className="font-medium text-foreground">
+        Fill in Chrome stopped: {job.result?.summary ?? "see the run log"}{" "}
+        <Link href={`/jobs/${job.id}`} className="text-xs font-normal text-brand-text hover:underline">run log</Link>
+      </p>
+      <label className="mt-2 block text-xs text-muted">
+        Answer what it asked (one per line), e.g. “How did you hear: Job Board”, “Postal code: 122001”, “Tick the terms checkbox”.
+        <textarea value={answers} onChange={(e) => setAnswers(e.target.value)} rows={3} maxLength={2000} className={fieldClass} />
+      </label>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button onClick={go} disabled={!answers.trim()} className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground shadow-sm hover:bg-brand-200 disabled:opacity-60 max-sm:min-h-[44px]">
+          <Send className="size-3.5" /> Continue in Chrome
+        </button>
+        <CostBadge kind="spend" size="xs" />
+        <span className="text-xs text-muted">Answers you&apos;ll reuse on every form belong in modes/_custom.md.</span>
+      </div>
+    </div>
+  );
+}
