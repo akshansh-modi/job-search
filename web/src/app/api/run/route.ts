@@ -29,7 +29,7 @@ import { readJsonObject } from "@/lib/json-body";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 import { createTagEnvelopeFilter } from "@/lib/tag-envelope.mjs";
 import { LATEX_TAG, buildLatexPrompt, persistLatexCv, resolveLatexPaths } from "@/lib/latex-cv.mjs";
-import { EMAIL_TAG, buildEmailPrompt, findAttachment, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
+import { EMAIL_TAG, buildEmailPrompt, findAttachment, isOwnAddress, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
 import { buildChromeFillPrompt, parseChromeFillBrief, postingUrlForReport } from "@/lib/chrome-fill.mjs";
 
 export const runtime = "nodejs";
@@ -160,6 +160,7 @@ export async function POST(req: Request) {
     } else {
       emailBrief = parseEmailBrief(brief);
       if (!emailBrief.ok) return bad(emailBrief.error);
+      if (isOwnAddress(careerOpsRoot(), emailBrief.brief.to)) return bad("That's your own email address. Enter the recruiter's or referrer's address.");
       emailPaths = resolveEmailPaths(careerOpsRoot(), abs);
       if (!emailPaths.ok) return bad(emailPaths.error);
     }

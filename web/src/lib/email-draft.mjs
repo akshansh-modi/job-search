@@ -10,7 +10,9 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { parseReportTitle, slug } from "./latex-cv.mjs";
+import * as yaml from "js-yaml";
 import { tagEnvelopeInstruction } from "./tag-envelope.mjs";
+import { getProfilePath } from "./core/profile-path.mjs";
 
 export const EMAIL_TAG = "email";
 const EMAIL_RE = /^[^\s@<>"']+@[^\s@<>"']+\.[a-z]{2,}$/i;
@@ -32,6 +34,22 @@ export function parseEmailBrief(brief) {
   if (!EMAIL_RE.test(to)) return { ok: false, error: "Enter a valid recipient email address." };
   const type = EMAIL_TYPES.includes(String(b.type)) ? String(b.type) : "hr";
   return { ok: true, brief: { to, type, name: String(b.name ?? "").slice(0, 80), why: String(b.why ?? "").slice(0, 400), notes: String(b.notes ?? "").slice(0, 600) } };
+}
+
+/**
+ * Is `to` the candidate's own address (config/profile.yml candidate.email)? An
+ * application email to yourself is a mistake, so the route refuses it.
+ * @param {string} root
+ * @param {string} to
+ */
+export function isOwnAddress(root, to) {
+  try {
+    const profile = /** @type {any} */ (yaml.load(fs.readFileSync(getProfilePath(root), "utf8")));
+    const own = String(profile?.candidate?.email ?? "").trim().toLowerCase();
+    return !!own && own === String(to).trim().toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 /**
