@@ -21,6 +21,7 @@ import { ScoreLevers } from "@/components/score-levers";
 import { PrepPack } from "@/components/prep-pack";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { CoverDraftButton } from "@/components/cover-draft-button";
+import { EmailDraftButton, LatexCvButton } from "@/components/latex-email-buttons";
 import { ApplyButton } from "@/components/apply-button";
 import { MarkPdfReadyButton } from "@/components/mark-pdf-ready-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
@@ -113,6 +114,8 @@ export function ReportView({
           {app && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
           {app && report && <CoverDraftButton n={id} company={companyName} />}
+          {app && report && <LatexCvButton n={id} company={companyName} />}
+          {app && report && <EmailDraftButton n={id} company={companyName} />}
           {applyHref && (
             <Link
               href={applyHref}
