@@ -155,6 +155,29 @@ current user (never as root), and Windows and macOS need a logged-in session. Th
 an AI model. Job definitions and run history stay in the gitignored `data/`
 directory.
 
+## Plan usage meter
+
+The sidebar meter shows your Claude plan's real 5-hour and weekly usage and
+when each one resets. These are the numbers claude.ai shows under Settings >
+Usage. Claude Code passes them to a
+[status-line command](https://code.claude.com/docs/en/statusline#rate-limit-usage)
+as `rate_limits`. They are available on Pro, Max and Ultra plans only, and they
+appear after the first reply of a session. The meter is opt-in. Until you set
+it up, the meter prints the exact line to add to `~/.claude/settings.json`.
+It has this form:
+
+```json
+"statusLine": { "type": "command", "command": "node \"/path/to/career-ops/web/scripts/claude-usage-statusline.mjs\" --out \"/path/to/data/.career-ops-web/claude-rate-limits.json\"" }
+```
+
+The script stores only the two percentages, their reset times and the capture
+time. It prints `5h 18% · 7d 68%` as your status line. If you already have a
+status line, keep it and pipe the same input through the capture first:
+`input=$(cat); printf '%s' "$input" | node …/claude-usage-statusline.mjs --quiet --out …`.
+A value captured before its window reset is shown greyed out as stale. It
+refreshes on your next Claude Code reply. The token totals under the bars are
+raw transcript activity. They are not plan usage.
+
 ## Development
 
 ```bash
