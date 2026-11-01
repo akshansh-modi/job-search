@@ -45,3 +45,13 @@ test("only known ids and valid verdict lines are kept, and results are tracked",
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("the scanner's yrs label reaches the triage prompt; 'none stated' is dropped", async () => {
+  const { inboxYears, buildTriagePrompt } = await import("../../src/lib/triage-batch.mjs");
+  const years = inboxYears("- [ ] https://x.test/1 | A | Dev | Gurugram | posted: 2026-10-29 | yrs: 8-10\n- [ ] https://x.test/2 | B | Dev | Noida | yrs: none stated\n");
+  assert.equal(years.get("https://x.test/1"), "8-10");
+  assert.equal(years.has("https://x.test/2"), false);
+  const p = buildTriagePrompt({ items: [{ id: 1, url: "https://x.test/1", company: "A", role: "Dev", yrs: "8-10", jd: null }], threshold: 3 });
+  assert.match(p, /"yrs":"8-10"/);
+  assert.match(p, /experience rules/);
+});

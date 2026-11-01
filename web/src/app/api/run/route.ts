@@ -33,7 +33,7 @@ import { LATEX_TAG, buildLatexPrompt, persistLatexCv, resolveLatexPaths } from "
 import { EMAIL_TAG, buildEmailPrompt, findAttachment, isOwnAddress, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
 import { buildChromeFillPrompt, parseChromeFillBrief, postingUrlForReport } from "@/lib/chrome-fill.mjs";
 import { choiceFor, modelArgs } from "@/lib/flows.mjs";
-import { TRIAGE_MAX, TRIAGE_TAG, buildTriagePrompt, jdFileFor, persistTriage, readTriage, triageThreshold } from "@/lib/triage-batch.mjs";
+import { TRIAGE_MAX, TRIAGE_TAG, buildTriagePrompt, inboxYears, jdFileFor, persistTriage, readTriage, triageThreshold } from "@/lib/triage-batch.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -200,14 +200,17 @@ export async function POST(req: Request) {
   }
 
   // triage: every pending inbox role not triaged yet (input "inbox"), capped per run.
-  let triageItems: { id: number; url: string; company: string; role: string; location?: string; jd: string | null }[] = [];
+  let triageItems: { id: number; url: string; company: string; role: string; location?: string; yrs?: string; jd: string | null }[] = [];
   if (kind === "triage") {
     const root = careerOpsRoot();
     const done = readTriage(root).results ?? {};
+    let pipelineMd = "";
+    try { pipelineMd = fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "data/pipeline.md"), "utf8"); } catch { /* no inbox */ }
+    const years = inboxYears(pipelineMd);
     triageItems = readInbox()
       .filter((j) => !j.done && !done[j.url])
       .slice(0, TRIAGE_MAX)
-      .map((j, i) => ({ id: i + 1, url: j.url, company: j.company, role: j.role, location: j.location, jd: jdFileFor(root, j.url) }));
+      .map((j, i) => ({ id: i + 1, url: j.url, company: j.company, role: j.role, location: j.location, yrs: years.get(j.url), jd: jdFileFor(root, j.url) }));
     if (!triageItems.length) return bad("Every pending inbox role is already triaged.");
   }
 
