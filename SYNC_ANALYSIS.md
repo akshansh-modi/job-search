@@ -298,3 +298,34 @@ These are verified against the source of both branches.
 ### Not changed
 - No feature-ui feature was reverted.
 - No main system-layer behaviour was reverted.
+
+---
+
+## Verification
+
+These were run on the merged tree with root deps installed (`npm install --no-package-lock`, since the root has no lockfile).
+
+| Check | `origin/main` | `origin/feature-ui` | merged |
+|---|---|---|---|
+| `web`: `npm ci` | ok | ok | ok |
+| `web`: `npm test` | 2121 pass / 0 fail | 2015 pass / 0 fail | **2168 pass / 0 fail** |
+| `web`: `npx tsc --noEmit` | ok | ok | ok |
+| `web`: `npm run build` | ok | ok | ok |
+| root `node test-all.mjs` | 1 fail | 3 fail | **3 fail**, the same 3 as feature-ui |
+
+The before-merge web counts were 0 failures only once the root deps were installed. Without them, tests that import root modules fail on `js-yaml`.
+
+**Root failures, none caused by the merge**
+1. `archive-posting egress guard blocked a legitimate request`
+   - Fails on main as well.
+   - This sandbox's network proxy blocks the request.
+   - Not fixed, per the brief.
+2. `SYSTEM_PATHS coverage gap`
+   - Fails on feature-ui already.
+   - `INDIA.md`, `local/jobspy_parser.py` and `save-draft.py` aren't registered in `lib/update-manifest.mjs`.
+   - Needs a layer decision; see the PR.
+3. `tests/help-flag-handled.test.mjs`
+   - Fails on feature-ui already.
+   - `web/scripts/mongo-worker.mjs` ignores `--help`, so the flag falls through and the script runs instead.
+
+A first root run while the merge was still uncommitted, with the baselines running at the same time, also failed `pipeline-lock`, the update-rollback suite and `verify-portals-help-flag`. A clean re-run passed all three, so they were artefacts of the dirty git state and the load.
