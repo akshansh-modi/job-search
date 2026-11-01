@@ -17,6 +17,10 @@ export function HeroGlow() {
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // The shader throws "WebGL is not supported" without a context (hardware
+    // acceleration off, some VMs/remote desktops): keep the plain background.
+    const probe = document.createElement("canvas");
+    if (!probe.getContext("webgl2") && !probe.getContext("webgl")) return;
 
     const readTheme = () => setDark(document.documentElement.classList.contains("dark"));
     readTheme();

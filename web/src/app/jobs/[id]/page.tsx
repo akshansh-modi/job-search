@@ -10,6 +10,7 @@ import { BackLink } from "@/components/back-link";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
+import { JobReply } from "@/components/jobs/job-reply";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -59,6 +60,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           )}
         </div>
       </section>
+
+      <JobReply job={job} />
 
       <ol className="mt-6 space-y-2">
         {job.steps.map((s, i) => (

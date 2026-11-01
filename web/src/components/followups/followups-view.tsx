@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
 import { useListSearch } from "@/lib/use-list-search";
-import { CalendarClock, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { LogDialog } from "@/components/followups/log-dialog";
@@ -18,6 +18,7 @@ import {
   type CadenceMetadata,
   type Urgency,
   daysHeatClass,
+  localISODate,
   oxfordJoin,
   relativeDays,
   urgencyRank,
@@ -28,6 +29,7 @@ import { FollowupsTableRowsSkeleton } from "@/components/page-loading-skeletons"
 import { startRouteProgress } from "@/components/route-progress";
 import { selectUpcomingFollowups } from "@/lib/core/followup-view.mjs";
 import { followupsSummarySlot } from "@/lib/followups-summary-slot.mjs";
+import { loggedOn, QUICK_LOG_CHANNEL } from "@/lib/followup-log.mjs";
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
 // touch is due, and the permanent history of every follow-up sent. The verdict
@@ -97,6 +99,7 @@ export function FollowupsView() {
   const [dialogFor, setDialogFor] = useState<CadenceEntry | null>(null);
   const [pinFor, setPinFor] = useState<CadenceEntry | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [quickLogging, setQuickLogging] = useState<Set<number>>(new Set());
 
   const refetch = useCallback(() => {
     fetch("/api/followups?full=1")
@@ -182,6 +185,35 @@ export function FollowupsView() {
     refetch();
   };
 
+  // One click: "I followed up today." Same write path as the Log dialog
+  // (/api/followups/log → the table row followup-cadence.mjs reads), with the
+  // server's local date and a generic channel; the dialog stays the way to add
+  // a channel, contact or note.
+  const quickLog = async (e: CadenceEntry) => {
+    if (quickLogging.has(e.num)) return;
+    setActionError(null);
+    setQuickLogging((prev) => new Set(prev).add(e.num));
+    try {
+      const res = await fetch("/api/followups/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appNum: e.num, company: e.company, role: e.role, channel: QUICK_LOG_CHANNEL }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        setActionError(typeof j.error === "string" ? `Couldn't log the follow-up: ${j.error}` : "Couldn't log the follow-up.");
+      }
+    } catch {
+      setActionError("Couldn't log the follow-up.");
+    }
+    setQuickLogging((prev) => {
+      const next = new Set(prev);
+      next.delete(e.num);
+      return next;
+    });
+    refetch();
+  };
+
   const toggleExpand = (num: number) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -211,7 +243,7 @@ export function FollowupsView() {
           <h1 className="font-display text-2xl tracking-tight text-landing">Follow-up Tracker</h1>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
           <p className="mt-2 max-w-3xl text-xs leading-relaxed text-faint">
-            Use <span className="font-medium text-muted">Log</span> after you actually send an email, LinkedIn message, or call. The count and next date update automatically; status changes recalculate urgency, while <span className="font-medium text-muted">Next date</span> lets you pin a custom reminder.
+            Use <span className="font-medium text-muted">Done today</span> (one click) or <span className="font-medium text-muted">Log</span> (channel, contact, notes) after you actually send an email, LinkedIn message, or call. The count and next date update automatically; status changes recalculate urgency, while <span className="font-medium text-muted">Next date</span> lets you pin a custom reminder.
           </p>
         </div>
         <div className="relative w-56 max-w-[35vw]">
@@ -305,6 +337,8 @@ export function FollowupsView() {
                   expanded={expanded.has(e.num)}
                   onToggle={() => toggleExpand(e.num)}
                   onLog={() => setDialogFor(e)}
+                  onQuickLog={() => quickLog(e)}
+                  quickLogging={quickLogging.has(e.num)}
                   onPin={() => setPinFor(e)}
                   onStatusSaved={refetch}
                   onRemove={removeLogged}
@@ -378,6 +412,8 @@ function FollowupRow({
   expanded,
   onToggle,
   onLog,
+  onQuickLog,
+  quickLogging,
   onPin,
   onStatusSaved,
   onRemove,
@@ -386,12 +422,15 @@ function FollowupRow({
   expanded: boolean;
   onToggle: () => void;
   onLog: () => void;
+  onQuickLog: () => void;
+  quickLogging: boolean;
   onPin: () => void;
   onStatusSaved: () => void;
   onRemove: (num: number) => void;
 }) {
   const statusLabel = e.status.charAt(0).toUpperCase() + e.status.slice(1);
   const Chevron = expanded ? ChevronDown : ChevronRight;
+  const doneToday = loggedOn(e, localISODate());
   return (
     <>
       <tr className="group transition-colors hover:bg-surface/40">
@@ -459,6 +498,23 @@ function FollowupRow({
         </td>
         <td className="whitespace-nowrap px-2.5 py-3">
           <span className="inline-flex items-center gap-0.5">
+            {doneToday ? (
+              <span className="inline-flex items-center gap-1 px-2 py-1 text-xs text-emerald-800 dark:text-emerald-400" title="A follow-up is already logged for today">
+                <Check className="size-3.5" /> Logged today
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={onQuickLog}
+                disabled={quickLogging}
+                aria-label={`Followed up today with ${e.company}`}
+                title="Log a follow-up sent today (channel: Other). Use Log to add a channel, contact or notes."
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand-text disabled:opacity-60"
+              >
+                {quickLogging ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                Done today
+              </button>
+            )}
             <button
               type="button"
               onClick={onLog}

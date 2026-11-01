@@ -5,6 +5,7 @@ import {
   parseAllowedHosts,
   parseAllowedOrigins,
 } from "@/lib/origin-guard.mjs";
+import { isOnline, queueCommand } from "@/lib/online.mjs";
 
 // Single choke point over everything the dashboard serves. Every request is
 // gated on the same-origin + loopback guard before it can reach a route handler
@@ -20,7 +21,7 @@ import {
 // was. It is what a local companion client needs: a browser extension calls
 // from a chrome-extension:// origin, which Fetch Metadata always reports as
 // "cross-site", so every one of its requests is refused otherwise.
-export function proxy(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const decision = checkRequest({
     secFetchSite: req.headers.get("sec-fetch-site"),
     origin: req.headers.get("origin"),
@@ -31,7 +32,39 @@ export function proxy(req: NextRequest) {
   if (!decision.ok) {
     return NextResponse.json({ error: decision.reason }, { status: decision.status });
   }
+  if (isOnline()) return online(req);
   return NextResponse.next();
+}
+
+// Online setup (CAREER_OPS_MODE=online, see online.mjs): nothing runs here. Every
+// /api mutation is queued in MongoDB for the worker on the user's Mac.
+const ONLINE_NOOP = new Set(["/api/runs/save"]); // run logs are written by the Mac's own run
+async function online(req: NextRequest) {
+  const { pathname, search } = req.nextUrl;
+  if (!pathname.startsWith("/api/")) return NextResponse.next();
+  // The Mac runs Claude Code, so tell the UI that is the CLI to use.
+  if (pathname === "/api/clis" && req.method === "GET") {
+    return NextResponse.json({ clis: [{ id: "claude", name: "Claude Code", installed: true }], remembered: "claude" });
+  }
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return NextResponse.next();
+  if (ONLINE_NOOP.has(pathname)) return new NextResponse(null, { status: 204 });
+  if (!(req.headers.get("content-type") ?? "").includes("application/json")) {
+    return NextResponse.json({ error: "Uploads work on your Mac only (npm run ui)." }, { status: 501 });
+  }
+  const body = await req.json().catch(() => undefined);
+  try {
+    const id = await queueCommand({ method: req.method, path: pathname + search, body });
+    if (pathname === "/api/run") {
+      const lines = [
+        { type: "text", text: `Queued for your Mac (#${id.slice(-6)}). It runs within 5 minutes; follow it on the Queue page.\n` },
+        { type: "done" },
+      ];
+      return new NextResponse(lines.map((l) => JSON.stringify(l)).join("\n") + "\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
+    return NextResponse.json({ ok: true, queued: true, id }, { status: 202 });
+  } catch {
+    return NextResponse.json({ error: "Could not reach the queue database." }, { status: 503 });
+  }
 }
 
 // Everything except build assets. Scoping this to /api left every page route

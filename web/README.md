@@ -35,7 +35,12 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 ## What works today
 
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
-  write back through the core's own scripts.
+  write back through the core's own scripts. Each row's report page also shows
+  your saved contacts at that company (`data/contacts.tsv`, matched like
+  `contact-lookup.mjs`) and the row's status history (`data/status-log.tsv`),
+  both read-only.
+- **Follow-ups** — the cadence from `followup-cadence.mjs`. **Done today** logs
+  a follow-up sent today in one click; **Log** records channel, contact and notes.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
   indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
 - **Scheduled scans** — save local zero-token or full-dataset scans and run due
@@ -46,6 +51,24 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
   CV editing with preview, settings. In **CV**, use **Upload PDF / TeX** to
   import a replacement, review the converted Markdown, then select **Update cv.md**.
   Conversion uses your configured AI CLI; saving backs up the previous CV.
+- **LaTeX CV** (report page) — tailors your own `.tex` resume for the role,
+  fact-checks it against `cv.md` (`generate-latex.mjs`), compiles with
+  `pdflatex`, warns if it runs past one page (the report is marked PDF-ready only at one page).
+- **Draft email** (report page) — HR or referral email following your
+  `modes/_custom.md` rules. You read it in the app; **Save to Gmail Drafts**
+  (via `save-draft.py`, IMAP) attaches the tailored PDF. Never sends, and
+  refuses your own address as the recipient.
+- **Fill in Chrome** (Apply on Workday, LinkedIn, Naukri, Indeed, Instahyre,
+  Wellfound, foundit) — Claude CLI only. Fills the form in your logged-in Chrome
+  through the Claude in Chrome extension, uploads the tailored CV and stops
+  before the final submit. When it needs something your files don't say, it
+  asks in the run log (`ASK:`); answer in the box there and it continues in the
+  same tab (up to 15 questions, 20 minutes per answer). Answers you reuse on
+  every form belong in `modes/_custom.md`.
+- **Flows** (sidebar) — pick the AI tool, model and effort for each task
+  (evaluate, research, CV, email, Fill in Chrome…). Saved to `config/flows.yml`;
+  passed as `--model`/`--effort` to Claude and Antigravity. Each run's log names
+  what it ran on. Fill in Chrome is locked to Claude.
 
 ### Full or focused evaluation
 
@@ -87,8 +110,29 @@ before starting an AI run.
   tool access, so on those the agent still *holds* write tools — what the pipeline
   guarantees is that the CV which gets rendered is the one the backend parsed out of
   the envelope, never a file an agent wrote behind it.
+- **Fill in Chrome is fenced:** only the Chrome extension's navigation, read,
+  form and upload tools are allowed; `javascript_tool`, `Write`, `Edit`, `Bash`,
+  `WebFetch` and `WebSearch` are denied. The prompt forbids the final submit,
+  account creation, passwords and 2FA, and treats page text as data.
 - **Additive:** the web is isolated from the core's packaging, CI and release
   automation. The CLI works exactly the same without it.
+
+## Online mode (optional, off by default)
+
+Local mode (`npm run ui`, files + direct Claude) is the default and needs nothing
+below. Online mode hosts the UI (e.g. on Vercel) with MongoDB as a mirror and a
+queue; **Claude still runs only on your Mac**.
+
+- Hosted app: set `CAREER_OPS_MODE=online`, `MONGODB_URI` and
+  `CAREER_OPS_WEB_ALLOWED_HOSTS`. It shows a read-only snapshot of your files
+  and queues every action into the `commands` collection (see **Queue**).
+- Mac worker: put `MONGODB_URI` in `web/.env.local` (gitignored, never commit
+  it), build the app, then `sh web/scripts/install-mongo-worker.sh`. launchd runs
+  `web/scripts/mongo-worker.mjs` every 5 minutes: it replays queued commands
+  against the local app and syncs changed files back. Remove with
+  `sh web/scripts/uninstall-mongo-worker.sh`.
+- Deploy only from a clean git worktree. Deploying from your data checkout
+  uploads gitignored personal files.
 
 ## Scheduled scans
 
@@ -112,6 +156,29 @@ current user (never as root), and Windows and macOS need a logged-in session. Th
 `web/scripts/scheduled-jobs-runner.mjs`; it never evaluates roles, applies, or invokes
 an AI model. Job definitions and run history stay in the gitignored `data/`
 directory.
+
+## Plan usage meter
+
+The sidebar meter shows your Claude plan's real 5-hour and weekly usage and
+when each one resets. These are the numbers claude.ai shows under Settings >
+Usage. Claude Code passes them to a
+[status-line command](https://code.claude.com/docs/en/statusline#rate-limit-usage)
+as `rate_limits`. They are available on Pro, Max and Ultra plans only, and they
+appear after the first reply of a session. The meter is opt-in. Until you set
+it up, the meter prints the exact line to add to `~/.claude/settings.json`.
+It has this form:
+
+```json
+"statusLine": { "type": "command", "command": "node \"/path/to/career-ops/web/scripts/claude-usage-statusline.mjs\" --out \"/path/to/data/.career-ops-web/claude-rate-limits.json\"" }
+```
+
+The script stores only the two percentages, their reset times and the capture
+time. It prints `5h 18% · 7d 68%` as your status line. If you already have a
+status line, keep it and pipe the same input through the capture first:
+`input=$(cat); printf '%s' "$input" | node …/claude-usage-statusline.mjs --quiet --out …`.
+A value captured before its window reset is shown greyed out as stale. It
+refreshes on your next Claude Code reply. The token totals under the bars are
+raw transcript activity. They are not plan usage.
 
 ## Development
 

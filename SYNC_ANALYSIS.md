@@ -260,3 +260,41 @@ These are verified against the source of both branches.
 - Treat the tracker's ✅ as "the file exists". Use `pdfFileReady`.
 - Hand-merge `package-lock.json`.
 - Push to `main` or `feature-ui` directly.
+
+---
+
+## Resolutions (merge of `origin/feature-ui`)
+
+### Textual conflicts
+
+| File | Resolution |
+|---|---|
+| `web/README.md` | Kept main's CV "Upload PDF / TeX" sentence, then our LaTeX CV / Draft email / Fill in Chrome / Flows bullets after it. |
+| `web/package-lock.json` | Took main's lock as-is, then ran `npm install` in `web/` so npm folded in `mongodb` from `package.json`. Not hand-merged. `package.json` (auto-merged) has both `pdfjs-dist` and `mongodb`. |
+| `web/src/app/api/run/route.ts` | Kept main's `resolveCvTemplate(codeRoot)` and our saved-JD note / kind ternary chain. Main's `codeRoot` argument to `buildPrompt(...)` survives at the end of the chain. All of main's other `codeRoot` / `coreRoot` hunks (the `needsScript` check, evaluation mode files, PDF render) auto-merged and were kept. Our `needsScript` entries (`generate-latex.mjs`, `save-draft.py`, `modes/triage.md`) are now checked against the code root, which is where they live. |
+| `web/src/app/pipeline/[id]/page.tsx` | Union of the imports. `pdfReadyForReport` was dropped, replaced by main's `pdfPathStatusForReport` + `tailoredCvOnDisk`. Main's `pdfFileReady` / `trackerMarkedPdf` computation comes first, then our contacts and status-history block. Both prop sets are passed to `ReportView`. |
+| `web/src/components/followups/followups-view.tsx` | Main's `useListSearch` / `list-search-sync` / `followupsSummarySlot` imports plus our `Check` icon and `followup-log.mjs` import. The body auto-merged: main's search plumbing plus our `quickLog` / "Done today". |
+
+### Auto-merged, checked by eye
+- **`web/next.config.mjs`:** main's `agentRules: false` and `serverExternalPackages` sit beside our `ONLINE` tracing block.
+- **`web/AGENTS.md`:** main's short "Next.js version" section plus our rules 3 and 4.
+- **`report-view.tsx`:**
+  - `ExternalLink` is still imported.
+  - Our buttons, Open posting and the Track section sit on main's `BackLink` and the split PDF props.
+  - `pdfReady` now means "file on disk", main's meaning. We adopted it for ApplyButton.
+- **`inbox-triage.tsx` / `triage-row.tsx`:** main's keyboard cursor and undo plus our AI-triage state and badge. No duplicate names; `tsc` is clean.
+- **`jobs/[id]/page.tsx`:** main's `BackLink` plus our `<JobReply>`.
+
+### Adaptations to main's APIs (merge-caused fixes)
+1. **Code-root split (#4430) for our new kinds.**
+   - `persistLatexCv` takes `coreRoot` and runs `generate-latex.mjs` / `mark-pdf-ready.mjs` from the checkout, with absolute paths.
+   - `saveGmailDraft` takes `coreRoot` and runs `save-draft.py` from the checkout.
+   - `buildTriagePrompt` takes `codeRoot` and names `modes/triage.md` by absolute checkout path. `modes/_brief.md` stays relative, because it's user layer.
+   - The route and `/api/email-draft` pass `resolveCodeRoot(process.cwd(), process.env)`.
+   - Single-root installs behave exactly as before.
+   - Pinned by the new `web/tests/lib/feature-kinds-code-root.test.mjs` and a new case in `triage-batch.test.mjs`.
+2. **WCAG AA status contrast (#6078).** Main's `status-tone-contrast.test.mjs` flagged our chips and status text. Following main's own fix pattern, `text-{emerald,amber}-700` became `-800` and `text-red-600` became `text-red-700 dark:text-red-400`. Files: `queue/page.tsx`, `application-track.tsx`, `flows-editor.tsx`, `followups-view.tsx`, `triage-row.tsx`, `latex-email-buttons.tsx`.
+
+### Not changed
+- No feature-ui feature was reverted.
+- No main system-layer behaviour was reverted.

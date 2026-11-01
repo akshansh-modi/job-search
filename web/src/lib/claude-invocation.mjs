@@ -153,7 +153,43 @@ export function grantsWriteCapability(scope) {
  * @param {{kind: string, prompt: string}} args
  * @returns {string[]}
  */
+/**
+ * chrome-fill (Claude only): the Claude in Chrome tools that fill a form in the
+ * user's own logged-in browser. No javascript_tool / shortcuts / browser switching.
+ * Submitting is forbidden by the prompt (chrome-fill.mjs); `computer` must stay to
+ * click "Next" between form pages, so that rule cannot be a tool fence.
+ */
+const CHROME = "mcp__claude-in-chrome__";
+export const CHROME_FILL_TOOLS = Object.freeze(
+  ["tabs_context_mcp", "tabs_create_mcp", "navigate", "read_page", "get_page_text", "find", "form_input", "computer", "file_upload"].map((t) => CHROME + t),
+);
+export const CHROME_FILL_DENIED = Object.freeze(
+  ["javascript_tool", "shortcuts_execute", "shortcuts_list", "switch_browser", "select_browser", "gif_creator", "upload_image"].map((t) => CHROME + t),
+);
+
+/** Kinds whose prompt goes over stdin and which accept user replies mid-run. */
+export const INTERACTIVE_KINDS = Object.freeze(["chrome-fill"]);
+
 export function claudeCliArgs({ kind, prompt }) {
+  if (kind === "chrome-fill") {
+    const base = scopeFrom(["Read", "Glob", "Grep", ...CHROME_FILL_TOOLS].join(","));
+    // Interactive: the prompt and the user's later replies arrive over stdin
+    // (--input-format stream-json), so the run can ask a question and continue in
+    // the same session and the same Chrome tab. `prompt` is sent by the route.
+    void prompt;
+    return [
+      "-p",
+      "--input-format", "stream-json",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--include-partial-messages",
+      "--permission-mode", "acceptEdits",
+      "--chrome",
+      "--strict-mcp-config",
+      "--allowedTools", base.allowed,
+      "--disallowedTools", [base.disallowed, ...CHROME_FILL_DENIED].join(","),
+    ];
+  }
   const scope = toolScopeFor(kind);
   return [
     "-p", prompt,

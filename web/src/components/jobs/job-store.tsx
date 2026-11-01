@@ -25,6 +25,8 @@ export type Job = {
   result?: JobResult;
   cost?: { tokens: number; usd?: number }; // per-run token cost (Claude result event) — local only
   reportN?: number | null;
+  runId?: string; // interactive runs (chrome-fill): id for POST /api/run/reply
+  question?: string | null; // interactive runs: the question waiting on the user
   startedAt: number;
   endedAt?: number;
 };
@@ -36,6 +38,7 @@ type Ctx = {
   startJob: (opts: StartOpts) => string | null;
   removeJob: (id: string) => void;
   clearFinished: () => void;
+  answerJob: (id: string, runId: string, reply: { text?: string; stop?: boolean }) => Promise<string | null>;
 };
 
 const JobsContext = createContext<Ctx | null>(null);
@@ -187,6 +190,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             result,
             cost,
             reportN: doneReportN,
+            question: null,
             endedAt: Date.now(),
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
@@ -223,6 +227,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             } else if (ev.type === "status") {
               steps.push({ kind: "status", label: ev.label, ts: Date.now() });
               patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
+            } else if (ev.type === "run") {
+              patch(id, (j) => ({ ...j, runId: ev.id }));
+            } else if (ev.type === "ask") {
+              patch(id, (j) => ({ ...j, question: ev.question }));
             } else if (ev.type === "text") {
               const full = text + ev.text;
               const vm = full.match(/VERDICT:[^\n]*/i);
@@ -250,11 +258,22 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   );
 
   const removeJob = useCallback((id: string) => setJobs((js) => js.filter((j) => j.id !== id)), []);
+  // Answer (or stop) an interactive run's question; clears it once the server takes it.
+  const answerJob = useCallback(async (id: string, runId: string, reply: { text?: string; stop?: boolean }): Promise<string | null> => {
+    try {
+      const r = await fetch("/api/run/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runId, ...reply }) });
+      if (!r.ok) return ((await r.json().catch(() => ({}))) as { error?: string }).error ?? "Could not send the reply.";
+      setJobs((js) => js.map((j) => (j.id === id ? { ...j, question: null } : j)));
+      return null;
+    } catch {
+      return "Could not reach the local server.";
+    }
+  }, []);
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running")), []);
 
   // A new object only when the list or an action changes, not on every render
   // of this provider (the screen-reader announcement re-renders it too).
-  const value = useMemo(() => ({ jobs, startJob, removeJob, clearFinished }), [jobs, startJob, removeJob, clearFinished]);
+  const value = useMemo(() => ({ jobs, startJob, removeJob, clearFinished, answerJob }), [jobs, startJob, removeJob, clearFinished, answerJob]);
 
   return (
     <JobsContext.Provider value={value}>

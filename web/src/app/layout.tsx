@@ -5,6 +5,7 @@ import { AppShell } from "@/components/app-shell";
 import { RouteProgressHost } from "@/components/route-progress-host";
 import { ThemeProvider } from "@/components/theme-provider";
 import { readFollowupsEnabled } from "@/lib/followups-server";
+import { ensureSnapshot } from "@/lib/online.mjs";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,6 +32,7 @@ const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('career-ops:the
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   await connection();
+  await ensureSnapshot(); // online setup: refresh the MongoDB copy (no-op locally)
   const followupsEnabled = readFollowupsEnabled();
   return (
     <html

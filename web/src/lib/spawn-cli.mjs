@@ -44,7 +44,7 @@ import { prepareCliLaunch } from "./cli-launch.mjs";
  * @param {import("node:child_process").SpawnOptionsWithoutStdio} options
  * @param {{cliId: string, capabilities: import("./worker-capabilities.mjs").Capabilities}} fencing
  */
-export function spawnHeadlessCli(binPath, args, options, fencing) {
+export function spawnHeadlessCli(binPath, args, options, fencing, { keepStdin = false } = {}) {
   // Fail fast rather than spawn unfenced. Omitting `fencing` used to spread
   // `undefined` into nothing, leaving cliId undefined — which matches no fencer,
   // so the raw argv was spawned with no error at all. The docstring's "it does
@@ -69,6 +69,8 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   // Nothing spawned here needs a console, so never inherit one. Set after the
   // caller's options so no caller can opt back in. No-op on POSIX (#3809).
   const child = spawn(launch.command, launch.args, { ...options, windowsHide: true });
-  child.stdin?.end();
+  // keepStdin: an interactive run (chrome-fill) feeds follow-up user messages over
+  // stdin (--input-format stream-json) and closes it itself when the run is done.
+  if (!keepStdin) child.stdin?.end();
   return child;
 }

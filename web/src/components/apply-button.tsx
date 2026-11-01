@@ -10,6 +10,19 @@ import { useApply } from "@/components/apply/apply-provider";
 // for THIS offer is ready (the tracker's PDF column is ✅, or a pdf worker for
 // this #n just finished). On click it opens the apply form-proxy for the offer
 // (where the user reviews and submits it themselves — never auto-submit).
+// Account-gated or unsupported by the form reader: its Playwright browser has none
+// of the user's logins. For these, Apply starts a "chrome-fill" run that fills the
+// form in the user's own logged-in Chrome (Claude in Chrome) and never submits.
+const OPEN_IN_OWN_BROWSER = /(^|\.)(myworkdayjobs\.com|linkedin\.com|naukri\.com|indeed\.com|instahyre\.com|wellfound\.com|foundit\.in)$/i;
+
+function opensInOwnBrowser(url: string): boolean {
+  try {
+    return OPEN_IN_OWN_BROWSER.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function ApplyButton({
   n,
   url,
@@ -24,7 +37,7 @@ export function ApplyButton({
   quiet?: boolean;
 }) {
   const router = useRouter();
-  const { jobs } = useJobs();
+  const { jobs, startJob } = useJobs();
   const apply = useApply();
 
   const pdfJobDone = jobs.some((j) => j.kind === "pdf" && j.input === n && j.status === "done");
@@ -47,6 +60,11 @@ export function ApplyButton({
     <button
       type="button"
       onClick={() => {
+        if (opensInOwnBrowser(url!)) {
+          const id = startJob({ title: `Fill in Chrome · ${company}`, subtitle: "you review and submit", kind: "chrome-fill", input: n, page: `/pipeline/${n}` });
+          if (id) router.push(`/jobs/${id}`);
+          return;
+        }
         // n + from ride along so the Apply page can mark this row Applied,
         // return the user to the page they left, and resolve THIS report's own
         // tailored CV rather than the newest one for the company. Read straight
@@ -62,7 +80,9 @@ export function ApplyButton({
           : "inline-flex items-center justify-center gap-1.5 rounded-full bg-brand px-3.5 py-1 text-xs font-medium text-brand-foreground shadow-sm transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
       }
       title={
-        quiet
+        opensInOwnBrowser(url!)
+          ? "Apply — fills the form in your logged-in Chrome; you review and submit yourself"
+          : quiet
           ? "Apply — below the apply line or caution; opens the form pre-filled, you review and submit yourself"
           : "Apply — opens the form pre-filled, you review and submit yourself"
       }

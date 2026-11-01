@@ -1,5 +1,5 @@
 /**
- * @typedef {{ type: "text", text: string } | { type: "tool", name: string } | { type: "status", label: string }} JobProgress
+ * @typedef {{ type: "text", text: string } | { type: "tool", name: string } | { type: "status", label: string } | { type: "run", id: string } | { type: "ask", question: string }} JobProgress
  * @typedef {{ status: "done", tokens?: number, costUsd?: number, reportN?: number } | { status: "error", message: string }} JobCompletion
  */
 
@@ -40,6 +40,9 @@ export async function readJobStream(stream, onProgress) {
     if (event?.type === "text" && typeof event.text === "string") onProgress(event);
     else if (event?.type === "tool" && typeof event.name === "string") onProgress(event);
     else if (event?.type === "status" && typeof event.label === "string") onProgress(event);
+    // Interactive runs (chrome-fill): the run id for replies, and a question waiting on the user.
+    else if (event?.type === "run" && typeof event.id === "string") onProgress(event);
+    else if (event?.type === "ask" && typeof event.question === "string") onProgress(event);
     // Keepalives and future non-terminal events do not confirm completion.
     return null;
   };
