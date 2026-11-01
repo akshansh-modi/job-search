@@ -31,6 +31,7 @@ import { createTagEnvelopeFilter } from "@/lib/tag-envelope.mjs";
 import { LATEX_TAG, buildLatexPrompt, persistLatexCv, resolveLatexPaths } from "@/lib/latex-cv.mjs";
 import { EMAIL_TAG, buildEmailPrompt, findAttachment, isOwnAddress, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
 import { buildChromeFillPrompt, parseChromeFillBrief, postingUrlForReport } from "@/lib/chrome-fill.mjs";
+import { choiceFor, modelArgs } from "@/lib/flows.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +46,14 @@ export async function POST(req: Request) {
   if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
-  const resolved = resolveCliOrFallback(requestedCliId);
+  // /flows: the task's saved CLI wins over the app's picker; `default` keeps the picker's.
+  let choice;
+  try {
+    choice = choiceFor(careerOpsRoot(), kind);
+  } catch (e) {
+    return Response.json({ error: `config/flows.yml could not be read: ${e instanceof Error ? e.message : e}` }, { status: 400 });
+  }
+  const resolved = resolveCliOrFallback(choice.cli === "default" ? requestedCliId : choice.cli);
   if (!resolved) {
     return new Response(JSON.stringify(cliUnavailableError(requestedCliId)), {
       status: 404,
@@ -244,7 +252,8 @@ export async function POST(req: Request) {
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  const flowArgs = modelArgs(cliId, choice);
+  const args = [...flowArgs, ...(isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt))];
 
   // Tracker-mutating runs hold a write token so a row delete can't race their
   // merge (tracker.mjs delete doesn't yet share a lock with merge-tracker,
@@ -394,6 +403,7 @@ export async function POST(req: Request) {
       if (runId) send({ type: "run", id: runId });
       if (fencing.notice) send({ type: "status", label: fencing.notice });
       if (substitution) send({ type: "status", label: substitution });
+      send({ type: "status", label: `Running on ${spec.name}${flowArgs.length ? ` · ${flowArgs.filter((_, i) => i % 2).join(" · ")}` : ""} (set in /flows)` });
       // Time-based keepalive. The stream is silent whenever the agent is thinking
       // or inside a long tool call, and in pdf mode it is silent for the whole
       // 15-25 KB <<cv-html>> envelope (cvFilter swallows every byte). Measured

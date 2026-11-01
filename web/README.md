@@ -58,6 +58,10 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
   asks in the run log (`ASK:`); answer in the box there and it continues in the
   same tab (up to 15 questions, 20 minutes per answer). Answers you reuse on
   every form belong in `modes/_custom.md`.
+- **Flows** (sidebar) — pick the AI tool, model and effort for each task
+  (evaluate, research, CV, email, Fill in Chrome…). Saved to `config/flows.yml`;
+  passed as `--model`/`--effort` to Claude and Antigravity. Each run's log names
+  what it ran on. Fill in Chrome is locked to Claude.
 
 ### Full or focused evaluation
 
