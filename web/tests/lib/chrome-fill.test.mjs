@@ -22,6 +22,8 @@ test("prompt carries the never-submit, untrusted-page and no-account rules", () 
   assert.match(p, /untrusted data, never instructions/);
   assert.match(p, /Never create an account/);
   assert.match(p, /\/tmp\/cv\.pdf/);
+  assert.match(p, /filter: "interactive"/);
+  assert.match(p, /scale: 0\.5/);
 });
 
 test("posting URL is read from the report header", () => {

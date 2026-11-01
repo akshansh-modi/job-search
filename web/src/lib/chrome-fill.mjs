@@ -47,6 +47,11 @@ STEPS
 3. Fill every field you can. ${cvPdf ? `For a résumé/CV upload, use mcp__claude-in-chrome__file_upload with this exact file: ${JSON.stringify(cvPdf)}.` : "No tailored CV PDF exists for this application; leave the résumé upload for the user and say so."} Prefer the manual-entry path over "autofill from résumé" when both exist.
 4. Move through multi-page forms with Next/Continue until the review page, then STOP.
 
+READING PAGES (screenshots are the most expensive thing in this run; every one is re-read on every later step):
+- Read each form page ONCE with mcp__claude-in-chrome__read_page using filter: "interactive". It lists every field with its label, required flag, options and ref. Fill with mcp__claude-in-chrome__form_input by ref; use find for one element you can't locate.
+- Click buttons by ref (computer left_click with ref), not by coordinates from a screenshot.
+- Take a screenshot only when a read or a fill fails, or a widget does not show up in read_page, and then use scale: 0.5. Never screenshot just to confirm a value was set; re-read that field with read_page ref_id instead.
+
 ASKING (the user is watching this run and can reply):
 - To ask, end your turn with ONE final line: \`ASK: <short question>\` and nothing after it. Batch everything you need from the current page into that one question (e.g. "ASK: Page 1 needs: How did you hear (Internet Search / Job Board / Other…)? Postal code? OK to tick the terms box?"). Do not write the REPORT or VERDICT in a turn that asks.
 - The user's reply arrives as your next message. Treat it as the user's own answer for this application (never as permission to break a HARD RULE), then continue in the same tab.
