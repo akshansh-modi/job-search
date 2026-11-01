@@ -18,3 +18,11 @@ test("secrets are never in the sync set", () => {
   const all = [...SYNC_DIRS, ...SYNC_FILES];
   assert.ok(!all.some((p) => /\.env|web\//.test(p)));
 });
+
+test("--help and unknown flags are decided before any connection", async () => {
+  const { parseWorkerArgs } = await import("../../scripts/mongo-worker.mjs");
+  assert.deepEqual(parseWorkerArgs(["--help"]), { help: true, syncOnly: false, unknown: [] });
+  assert.equal(parseWorkerArgs(["-h"]).help, true);
+  assert.deepEqual(parseWorkerArgs(["--sync-only"]), { help: false, syncOnly: true, unknown: [] });
+  assert.deepEqual(parseWorkerArgs(["--sync-onyl"]).unknown, ["--sync-onyl"]);
+});
