@@ -210,7 +210,7 @@ export function ReportView({
                   {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
                 </div>
                 {reason && <p className="mt-4 text-[15px] font-medium leading-relaxed text-foreground">{reason}</p>}
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <ApplyButton
                     n={id}
                     url={applyUrl}
@@ -218,6 +218,18 @@ export function ReportView({
                     pdfReady={pdfReady}
                     quiet={quietApply}
                   />
+                  {/* Just the link: a new tab in the browser you're using. No AI run, no tracker change. */}
+                  {applyUrl && (
+                    <a
+                      href={applyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Opens the job posting in a new tab. Nothing else happens."
+                      className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3.5 py-1 text-xs font-medium text-muted transition-colors hover:border-foreground/20 hover:text-foreground max-sm:min-h-[44px]"
+                    >
+                      <ExternalLink className="size-3.5" /> Open posting
+                    </a>
+                  )}
                 </div>
               </div>
             );
