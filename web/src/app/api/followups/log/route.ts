@@ -5,6 +5,7 @@ import { CHANNELS, isRealISODate, localISODate } from "@/lib/followups";
 import { parseFollowupId } from "@/lib/followup-id.mjs";
 import { followupsLogPath, withFollowupsWrite, followupsWriteError } from "@/lib/followups-server";
 import { readJsonObject } from "@/lib/json-body";
+import { buildFollowupAppend, followupCell } from "@/lib/followup-log.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,17 +17,9 @@ export const dynamic = "force-dynamic";
 // (Earlier builds wrote bullet lines; those stay in place — the core parser now
 // reads both formats — but every new log is a full-fidelity table row.)
 
-/** Table cells must stay single-line and pipe-free. `max` optional — notes are
- *  deliberately uncapped (user decision), identity fields keep a sanity cap. */
-function cell(v: unknown, max?: number): string {
-  const s = String(v ?? "")
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\|/g, "/")
-    .trim();
-  return max ? s.slice(0, max) : s;
-}
-
-const TABLE_HEADER = "| num | appNum | date | company | role | channel | contact | notes |\n|---|---|---|---|---|---|---|---|\n";
+// Row format + num allocation live in followup-log.mjs, where a test feeds them
+// to the core's own parser.
+const cell = followupCell;
 
 export async function POST(req: Request) {
   const body = await readJsonObject<{
@@ -73,28 +66,8 @@ export async function POST(req: Request) {
       if (fs.existsSync(file)) existing = fs.readFileSync(file, "utf8");
       else fs.writeFileSync(file, "# Follow-ups\n\n", "utf8");
 
-      // Auto-increment num = max existing TABLE num + 1 (legacy bullets carry none).
-      let maxNum = 0;
-      let hasHeader = false;
-      for (const line of existing.split("\n")) {
-        if (!line.startsWith("|")) continue;
-        const first = line.split("|")[1]?.trim() ?? "";
-        // Both header spellings exist in the wild: "num" (this writer) and
-        // "#" (files created per modes/followup.md) — recognize either, or a
-        // second header block gets appended into CLI-created files.
-        if (/^(num|#)$/i.test(first)) hasHeader = true;
-        const n = Number.parseInt(first, 10);
-        if (Number.isInteger(n) && n > maxNum) maxNum = n;
-      }
-      const num = maxNum + 1;
-
-      let out = "";
-      // CLI-created files may lack a trailing newline — guard regardless of
-      // whether we're also inserting the header, or the row glues to the last line.
-      if (existing && !existing.endsWith("\n")) out += "\n";
-      if (!hasHeader) out += TABLE_HEADER;
-      out += `| ${num} | ${appNum} | ${date} | ${company} | ${role} | ${channel} | ${contact} | ${notes} |\n`;
-      fs.appendFileSync(file, out, "utf8");
+      const { text, num } = buildFollowupAppend(existing, { appNum, date, company, role, channel, contact, notes });
+      fs.appendFileSync(file, text, "utf8");
       return Response.json({ ok: true, num, appNum, date, channel });
     });
   } catch (e) {

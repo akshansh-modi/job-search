@@ -30,6 +30,8 @@ import { KeywordCoverage } from "@/components/keyword-coverage";
 import { CompanyEvidence } from "@/components/company-evidence";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { PageFrame } from "@/components/page-frame";
+import { SavedContacts, StatusHistory, type StatusHistoryResult } from "@/components/application-track";
+import type { CompanyContacts } from "@/lib/report-contacts-server";
 
 // Progressive disclosure of the report. Current oferta.md writes letter F as
 // Interview Plan (STAR+R), not a verdict — never promote by letter (#3416).
@@ -56,6 +58,8 @@ export function ReportView({
   backHref = "/pipeline",
   applyHref,
   reportNum = null,
+  contacts = null,
+  statusHistory = null,
 }: {
   id: string;
   app: Application | null;
@@ -72,6 +76,10 @@ export function ReportView({
   backHref?: string;
   applyHref?: string;
   reportNum?: number | null;
+  /** Saved contacts at this row's company (data/contacts.tsv); null without a row. */
+  contacts?: CompanyContacts | null;
+  /** This row's status-log.tsv changes; null without a row. */
+  statusHistory?: StatusHistoryResult | null;
 }) {
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
@@ -87,6 +95,12 @@ export function ReportView({
   const pdfReady = (app?.pdf ?? "").includes("✅") || pdfReadyFromIndex;
   const company = app ? companyPresentation(app) : null;
   const companyName = company?.label ?? app?.company ?? meta?.title ?? id;
+  const track = (
+    <>
+      {app?.company && contacts && <SavedContacts company={companyName} result={contacts} />}
+      {app && statusHistory && <StatusHistory trackerNum={app.n} result={statusHistory} />}
+    </>
+  );
 
   return (
     <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
@@ -280,6 +294,7 @@ export function ReportView({
               guessing one from the report would surface another company's
               history. */}
           {app?.company && <CompanyEvidence company={app.company} />}
+          {track}
           <ScoreMethodology />
         </>
       ) : (
@@ -288,6 +303,7 @@ export function ReportView({
           No report file found for #{id} in <code className="text-foreground">reports/</code>.
         </div>
       )}
+      {!report && track}
     </PageFrame>
   );
 }
