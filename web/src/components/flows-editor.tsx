@@ -32,15 +32,16 @@ export function FlowsEditor() {
 
   // Per kind: runs, failures and median cost, from this browser's recent jobs.
   const stats = useMemo(() => {
-    const out: Record<string, { runs: number; failed: number; usd: number | null }> = {};
+    const out: Record<string, { runs: number; failed: number; tokens: number | null }> = {};
     for (const j of jobs) {
       if (j.status === "running" || !j.kind) continue;
-      const s = (out[j.kind] ??= { runs: 0, failed: 0, usd: null });
+      const s = (out[j.kind] ??= { runs: 0, failed: 0, tokens: null });
       s.runs += 1;
       if (j.status === "error") s.failed += 1;
     }
     for (const kind of Object.keys(out)) {
-      out[kind].usd = median(jobs.filter((j) => j.kind === kind && j.status === "done" && typeof j.cost?.usd === "number").map((j) => j.cost!.usd as number));
+      // Tokens, not $: on a Claude plan the CLI's dollar figure is API-equivalent; tokens are what eat the 5-hour limit.
+      out[kind].tokens = median(jobs.filter((j) => j.kind === kind && j.status === "done" && typeof j.cost?.tokens === "number").map((j) => j.cost!.tokens));
     }
     return out;
   }, [jobs]);
@@ -79,7 +80,7 @@ export function FlowsEditor() {
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="font-medium text-foreground">{t.name}</p>
                     <p className="text-xs text-muted">
-                      {s ? `${s.runs} run${s.runs === 1 ? "" : "s"} · ${s.failed} failed${s.usd != null ? ` · ~$${s.usd.toFixed(2)} each` : ""}` : "no runs yet"}
+                      {s ? `${s.runs} run${s.runs === 1 ? "" : "s"} · ${s.failed} failed${s.tokens != null ? ` · ~${s.tokens >= 1e6 ? `${(s.tokens / 1e6).toFixed(1)}M` : `${Math.round(s.tokens / 1e3)}k`} tokens each` : ""}` : "no runs yet"}
                     </p>
                   </div>
                   <p className="mt-1 text-xs text-muted">{t.does}</p>
