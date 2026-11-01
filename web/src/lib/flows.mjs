@@ -40,6 +40,7 @@ export const FLOWS = [
     id: "evaluate",
     name: "Evaluate",
     tasks: [
+      { kind: "triage", name: "Triage the inbox", does: "Quick PASS / MARGINAL / FAIL with a reason for each new role, from the saved job descriptions. Nothing is skipped for you.", default: { cli: "default", model: "sonnet", effort: "medium" } },
       { kind: "evaluate", name: "Full evaluation", does: "Scores the role A-G against your CV and writes the report.", default: { cli: "default", model: "sonnet", effort: "high" } },
     ],
   },

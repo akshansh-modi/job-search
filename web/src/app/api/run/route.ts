@@ -32,6 +32,7 @@ import { LATEX_TAG, buildLatexPrompt, persistLatexCv, resolveLatexPaths } from "
 import { EMAIL_TAG, buildEmailPrompt, findAttachment, isOwnAddress, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
 import { buildChromeFillPrompt, parseChromeFillBrief, postingUrlForReport } from "@/lib/chrome-fill.mjs";
 import { choiceFor, modelArgs } from "@/lib/flows.mjs";
+import { TRIAGE_MAX, TRIAGE_TAG, buildTriagePrompt, jdFileFor, persistTriage, readTriage, triageThreshold } from "@/lib/triage-batch.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -78,7 +79,7 @@ export async function POST(req: Request) {
   // it to modes/oferta.md meant a configured market passed a check on a file the
   // run never opens, and would have missed a market dir with no evaluation mode.
   const lang = readLanguageConfig();
-  const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", cover: "modes/cover.md", "latex-cv": "generate-latex.mjs", "email-draft": "save-draft.py" };
+  const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", cover: "modes/cover.md", "latex-cv": "generate-latex.mjs", "email-draft": "save-draft.py", triage: "modes/triage.md" };
   const required = needsScript[kind];
   // CAREER_OPS_ROOT is runtime user data, not a build input. Tracing this
   // dynamic path would copy the whole web project into every server bundle.
@@ -193,6 +194,18 @@ export async function POST(req: Request) {
     });
   }
 
+  // triage: every pending inbox role not triaged yet (input "inbox"), capped per run.
+  let triageItems: { id: number; url: string; company: string; role: string; location?: string; jd: string | null }[] = [];
+  if (kind === "triage") {
+    const root = careerOpsRoot();
+    const done = readTriage(root).results ?? {};
+    triageItems = readInbox()
+      .filter((j) => !j.done && !done[j.url])
+      .slice(0, TRIAGE_MAX)
+      .map((j, i) => ({ id: i + 1, url: j.url, company: j.company, role: j.role, location: j.location, jd: jdFileFor(root, j.url) }));
+    if (!triageItems.length) return bad("Every pending inbox role is already triaged.");
+  }
+
   const coverRequest = kind === "cover" ? parseCoverRequest({ input, brief, root: careerOpsRoot(), findReportFile }) : undefined;
   if (coverRequest && !coverRequest.ok) {
     return new Response(JSON.stringify({ error: coverRequest.error }), {
@@ -220,6 +233,8 @@ export async function POST(req: Request) {
   const cvTemplate = kind === "pdf" ? await resolveCvTemplate(careerOpsRoot()) : undefined;
   const prompt = chromeFillPrompt
     ? chromeFillPrompt
+    : kind === "triage"
+    ? buildTriagePrompt({ items: triageItems, threshold: triageThreshold(careerOpsRoot()) })
     : latexPaths?.ok
     ? buildLatexPrompt({ n: input, reportFile: tagReportFile, baseTexContent: fs.readFileSync(/* turbopackIgnore: true */ latexPaths.paths.baseTex, "utf8"), profile: profileRef(careerOpsRoot()), memory: readMemory() })
     : emailBrief?.ok
@@ -438,7 +453,7 @@ export async function POST(req: Request) {
       // and the PDF renders correctly server-side. Emit a throttled keepalive so
       // the stream never idles during the filtered phase. Unknown event types are
       // ignored by the client's switch, so this is safe for older tabs too.
-      const tagFilter = kind === "latex-cv" ? createTagEnvelopeFilter(LATEX_TAG) : kind === "email-draft" ? createTagEnvelopeFilter(EMAIL_TAG) : null;
+      const tagFilter = kind === "latex-cv" ? createTagEnvelopeFilter(LATEX_TAG) : kind === "email-draft" ? createTagEnvelopeFilter(EMAIL_TAG) : kind === "triage" ? createTagEnvelopeFilter(TRIAGE_TAG) : null;
       const sendAgentText = (text: string) => {
         const filter = cvFilter ?? reportFilter ?? tagFilter;
         const visible = filter ? filter.push(text) : text;
@@ -691,6 +706,17 @@ export async function POST(req: Request) {
             send({ type: "error", msg: baseErr });
           } else if (!cleanExit || sawError) {
             send({ type: "error", msg: "The run hit an error before finishing — re-run it." });
+          } else if (kind === "triage") {
+            // Each `[id] TRIAGE:` line is validated against the ids we sent, so an agent
+            // that wrapped its lines in two envelopes loses nothing: read the whole output.
+            const triageBody = envelope.ok ? envelope.body : tagFilter.raw();
+            const r = persistTriage({ root: careerOpsRoot(), items: triageItems, body: triageBody, model: `${cliId}${choice.model ? `/${choice.model}` : ""}`, today });
+            if (!r.ok) send({ type: "error", msg: r.error });
+            else {
+              const c = r.counts!;
+              send({ type: "text", text: `\n${triageBody.trim()}\n\n✅ Triaged ${triageItems.length - r.missing!}: ${c.PASS} PASS · ${c.MARGINAL} MARGINAL · ${c.FAIL} FAIL · ${c.SKIP} SKIP${r.missing ? ` (${r.missing} got no line — run again)` : ""}. Saved to data/triage.json; see the inbox.\n` });
+              send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+            }
           } else if (!envelope.ok) {
             send({ type: "error", msg: envelope.error.slice(0, 200) });
           } else if (latexPaths?.ok) {

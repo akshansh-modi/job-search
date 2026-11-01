@@ -11,6 +11,14 @@ import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 import { inboxScoreTarget } from "@/lib/inbox-score-target.mjs";
 
+export type AiTriage = { verdict: "PASS" | "MARGINAL" | "FAIL" | "SKIP"; score: number; reason: string; model: string; at: string };
+const AI_TONE: Record<AiTriage["verdict"], string> = {
+  PASS: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  MARGINAL: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  FAIL: "bg-red-500/10 text-red-700 dark:text-red-400",
+  SKIP: "bg-surface-hover text-muted",
+};
+
 export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null };
 
 function agoLabel(age: number | null): string | null {
@@ -30,6 +38,7 @@ export function TriageRow({
   source,
   age,
   scored,
+  ai,
   selected,
   shortlisted,
   onToggleSelect,
@@ -40,6 +49,8 @@ export function TriageRow({
   source: AtsSource | null;
   age: number | null;
   scored?: RowScore;
+  /** AI triage (data/triage.json): verdict + reason, shown as advice only. */
+  ai?: AiTriage;
   selected: boolean;
   shortlisted: boolean;
   onToggleSelect: () => void;
@@ -91,8 +102,14 @@ export function TriageRow({
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
           {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
-          {!evaluated && <span className="italic text-muted">not scored</span>}
+          {!evaluated && !ai && <span className="italic text-muted">not scored</span>}
+          {!evaluated && ai && (
+            <span className={cn("rounded px-1 py-px font-medium", AI_TONE[ai.verdict])} title={`AI triage ${ai.at} · ${ai.model}`}>
+              {ai.verdict} {ai.score}/5
+            </span>
+          )}
         </p>
+        {!evaluated && ai && <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{ai.reason}</p>}
       </div>
 
       {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}

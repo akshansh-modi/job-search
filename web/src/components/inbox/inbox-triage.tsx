@@ -9,7 +9,7 @@ import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
 import { FacetChips } from "./facet-chips";
-import { TriageRow, type RowScore } from "./triage-row";
+import { TriageRow, type AiTriage, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
@@ -121,6 +121,15 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   }, [inbox, now]);
 
   // EVALUADA lookup: the latest evaluate worker per posting URL (running → badge).
+  // AI triage results (data/triage.json); refetched when a triage run finishes.
+  const [aiTriage, setAiTriage] = useState<Record<string, AiTriage>>({});
+  const triageJob = useMemo(() => jobs.filter((j) => j.kind === "triage").sort((a, b) => b.startedAt - a.startedAt)[0], [jobs]);
+  useEffect(() => {
+    fetch("/api/triage").then((r) => r.json()).then((d) => setAiTriage(d.results ?? {})).catch(() => {});
+  }, [triageJob?.status]);
+  const untriaged = inbox.filter((j) => !j.done && !aiTriage[j.url]).length;
+  const passUrls = inbox.filter((j) => !j.done && aiTriage[j.url]?.verdict === "PASS");
+
   const scoreByUrl = useMemo(() => {
     const best = new Map<string, (typeof jobs)[number]>();
     for (const j of jobs) {
@@ -286,6 +295,25 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         <p className="text-sm font-medium text-foreground">
           {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
         </p>
+        <span className="flex items-center gap-3">
+          {triageJob?.status === "running" ? (
+            <a href={`/jobs/${triageJob.id}`} className="text-xs text-brand-text hover:underline">Triaging…</a>
+          ) : untriaged > 0 ? (
+            <button
+              type="button"
+              onClick={() => startJob({ title: "Triage inbox", subtitle: `${untriaged} roles`, kind: "triage", input: "inbox", page: "/pipeline" })}
+              title="Quick PASS / MARGINAL / FAIL with a reason for each untriaged role (model set in Flows). Nothing is skipped for you."
+              className="text-xs font-medium text-brand-text hover:underline max-sm:min-h-[44px]"
+            >
+              Triage {untriaged} with AI
+            </button>
+          ) : null}
+          {passUrls.length > 0 && (
+            <button type="button" onClick={() => passUrls.forEach((j) => !isShortlisted(j.url) && save(j))} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
+              Shortlist {passUrls.length} PASS
+            </button>
+          )}
+        </span>
         {hiddenCount > 0 && (
           <button type="button" onClick={() => void restoreHidden()} disabled={restoring} aria-busy={restoring} className="text-xs text-faint transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]">
             {hiddenCount} hidden · {restoring ? "restoring…" : "restore"}
@@ -315,6 +343,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               source={e.source}
               age={e.age}
               scored={scoreByUrl.get(e.job.url)}
+              ai={aiTriage[e.job.url]}
               selected={selected.has(e.job.url)}
               shortlisted={isShortlisted(e.job.url)}
               onToggleSelect={() => toggleSelect(e.job.url)}

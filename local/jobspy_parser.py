@@ -12,6 +12,7 @@ the new commit.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,9 @@ import sys
 from pathlib import Path
 
 VENV_PY = Path(__file__).resolve().parent / "jobspy-venv" / "bin" / "python"
+# JD text JobSpy already downloaded, kept for triage (web/src/lib/triage-batch.mjs reads
+# jds/jobspy/<sha1(url)[:16]>.md). No extra requests: it is the same response.
+JD_DIR = Path(os.environ.get("CAREER_OPS_ROOT") or Path(__file__).resolve().parent.parent) / "jds" / "jobspy"
 
 try:
     from jobspy import scrape_jobs
@@ -70,6 +74,10 @@ for r in df.to_dict("records"):
         continue
     # scan.mjs's experience_filter reads years from `description` (jd-years.mjs).
     desc = "\n".join(x for x in [f"Experience: {exp}" if exp else None, clean(r.get("description"))] if x)
+    if desc:
+        JD_DIR.mkdir(parents=True, exist_ok=True)
+        head = f"# {title} — {clean(r.get('company')) or ''}\nURL: {url}\nLocation: {clean(r.get('location')) or ''}\n\n"
+        (JD_DIR / (hashlib.sha1(url.encode()).hexdigest()[:16] + ".md")).write_text(head + desc, encoding="utf-8")
     jobs.append({
         "title": title,
         "url": url,
