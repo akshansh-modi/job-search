@@ -158,18 +158,23 @@ function writeJobPortals(root, job) {
   if (!positive.length && !fallbackPositive.length) {
     throw new Error("Scheduled scans require title keywords in the job or portals.yml title_filter.positive.");
   }
+  // An empty list in the job means "not set here": keep portals.yml's own list, as
+  // `positive` always has. Overwriting with [] silently dropped the user's negative
+  // titles and location allow-list, so a portals scan let in every country.
+  const orBase = (list, baseList) => (Array.isArray(list) && list.length ? list : Array.isArray(baseList) ? baseList : []);
   base.title_filter = {
     ...(base.title_filter || {}),
     positive: positive.length ? positive : fallbackPositive,
-    negative: Array.isArray(filters.negative) ? filters.negative : [],
+    negative: orBase(filters.negative, base.title_filter?.negative),
   };
   if (base.title_filter_full) base.title_filter_full = { ...base.title_filter_full, ...base.title_filter };
+  const loc = base.location_filter || {};
   base.location_filter = {
-    ...(base.location_filter || {}),
-    allow: Array.isArray(filters.allow) ? filters.allow : [],
-    block: Array.isArray(filters.block) ? filters.block : [],
-    block_hard: Array.isArray(filters.blockHard) ? filters.blockHard : [],
-    always_allow: Array.isArray(filters.alwaysAllow) ? filters.alwaysAllow : [],
+    ...loc,
+    allow: orBase(filters.allow, loc.allow),
+    block: orBase(filters.block, loc.block),
+    block_hard: orBase(filters.blockHard, loc.block_hard),
+    always_allow: orBase(filters.alwaysAllow, loc.always_allow),
   };
 
   const tempDir = path.join(root, "data", "tmp");

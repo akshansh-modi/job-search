@@ -152,6 +152,27 @@ test("scheduled overlay falls back to portal title keywords and preserves hard l
   }
 });
 
+test("empty job filter lists keep portals.yml's negatives and location lists", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-keep-"));
+  fs.writeFileSync(path.join(temp, "portals.yml"), "title_filter:\n  positive: [engineer]\n  negative: [Principal]\nlocation_filter:\n  always_allow: [India]\n  allow: [Pune]\n", "utf8");
+  const job = { id: "22222222-2222-4222-8222-222222222222", engine: "portals", filters: { positive: [], negative: [], allow: [], alwaysAllow: [], block: ["Delhi"] } };
+  try {
+    let overlay;
+    executeJob(temp, job, {
+      spawnFn: (_node, _args, options) => {
+        overlay = yaml.load(fs.readFileSync(options.env.CAREER_OPS_PORTALS, "utf8"));
+        return { status: 0, stdout: "New offers added: 0\n", stderr: "" };
+      },
+    });
+    assert.deepEqual(overlay.title_filter.negative, ["Principal"]);
+    assert.deepEqual(overlay.location_filter.always_allow, ["India"]);
+    assert.deepEqual(overlay.location_filter.allow, ["Pune"]);
+    assert.deepEqual(overlay.location_filter.block, ["Delhi"]);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 test("scheduled scan hands core the profile path the web resolves, not the raw relative value", () => {
   // The scanner runs with cwd = the checkout, but the web resolves a relative
   // CAREER_OPS_PROFILE under the data root it passes, so forwarding the raw value
