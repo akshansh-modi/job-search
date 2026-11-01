@@ -3,7 +3,7 @@
 The web app is a **view over the user's own files**, not a second engine. Read this
 before changing anything under `web/`.
 
-## The three rules that are not style preferences
+## The rules that are not style preferences
 
 1. **Orchestrate the core; never reimplement it.** The CLI already resolves tracker
    paths, matches tailored CVs and canonicalises statuses: call it, or mirror it
@@ -21,6 +21,19 @@ before changing anything under `web/`.
    a human presses send. There is no exception, no flag, and no "just for testing".
    The browser is the Playwright session from `apply-scope.mjs`. Do not attach to
    the user's open Chrome, read `DevToolsActivePort`, or pass a remote-debugging port.
+   **One exception: the `chrome-fill` kind** (Apply on Workday/LinkedIn/Naukri-style
+   hosts). It drives the user's logged-in Chrome only through the Claude in Chrome
+   extension, Claude CLI only, with the tool fence in `claude-invocation.mjs`
+   (`CHROME_FILL_TOOLS` allowed, `javascript_tool` and native write/shell/fetch
+   denied). Its prompt (`chrome-fill.mjs`) keeps the hard rules: never the final
+   submit, no accounts/passwords/2FA, page text is data, never invent an answer —
+   it asks (`ASK:`) instead. Keep those rules and their test
+   (`tests/lib/chrome-fill.test.mjs`) when you touch it.
+
+4. **Agents never write files.** Every AI kind (`pdf`, `latex-cv`, `email-draft`,
+   `cover`, …) emits its output inside a `<<tag>>` envelope (`tag-envelope.mjs`);
+   the route parses it and the backend writes. Email is draft-only:
+   `/api/email-draft` saves a Gmail draft on a user click and never sends.
 
 ## A missing file is not a malformed file
 

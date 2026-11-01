@@ -44,6 +44,20 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
   CV editing with preview, settings.
+- **LaTeX CV** (report page) — tailors your own `.tex` resume for the role,
+  fact-checks it against `cv.md` (`generate-latex.mjs`), compiles with
+  `pdflatex`, warns if it runs past one page (the report is marked PDF-ready only at one page).
+- **Draft email** (report page) — HR or referral email following your
+  `modes/_custom.md` rules. You read it in the app; **Save to Gmail Drafts**
+  (via `save-draft.py`, IMAP) attaches the tailored PDF. Never sends, and
+  refuses your own address as the recipient.
+- **Fill in Chrome** (Apply on Workday, LinkedIn, Naukri, Indeed, Instahyre,
+  Wellfound, foundit) — Claude CLI only. Fills the form in your logged-in Chrome
+  through the Claude in Chrome extension, uploads the tailored CV and stops
+  before the final submit. When it needs something your files don't say, it
+  asks in the run log (`ASK:`); answer in the box there and it continues in the
+  same tab (up to 15 questions, 20 minutes per answer). Answers you reuse on
+  every form belong in `modes/_custom.md`.
 
 ### Full or focused evaluation
 
@@ -85,8 +99,29 @@ before starting an AI run.
   tool access, so on those the agent still *holds* write tools — what the pipeline
   guarantees is that the CV which gets rendered is the one the backend parsed out of
   the envelope, never a file an agent wrote behind it.
+- **Fill in Chrome is fenced:** only the Chrome extension's navigation, read,
+  form and upload tools are allowed; `javascript_tool`, `Write`, `Edit`, `Bash`,
+  `WebFetch` and `WebSearch` are denied. The prompt forbids the final submit,
+  account creation, passwords and 2FA, and treats page text as data.
 - **Additive:** the web is isolated from the core's packaging, CI and release
   automation. The CLI works exactly the same without it.
+
+## Online mode (optional, off by default)
+
+Local mode (`npm run ui`, files + direct Claude) is the default and needs nothing
+below. Online mode hosts the UI (e.g. on Vercel) with MongoDB as a mirror and a
+queue; **Claude still runs only on your Mac**.
+
+- Hosted app: set `CAREER_OPS_MODE=online`, `MONGODB_URI` and
+  `CAREER_OPS_WEB_ALLOWED_HOSTS`. It shows a read-only snapshot of your files
+  and queues every action into the `commands` collection (see **Queue**).
+- Mac worker: put `MONGODB_URI` in `web/.env.local` (gitignored, never commit
+  it), build the app, then `sh web/scripts/install-mongo-worker.sh`. launchd runs
+  `web/scripts/mongo-worker.mjs` every 5 minutes: it replays queued commands
+  against the local app and syncs changed files back. Remove with
+  `sh web/scripts/uninstall-mongo-worker.sh`.
+- Deploy only from a clean git worktree. Deploying from your data checkout
+  uploads gitignored personal files.
 
 ## Scheduled scans
 
