@@ -35,7 +35,12 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 ## What works today
 
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
-  write back through the core's own scripts.
+  write back through the core's own scripts. Each row's report page also shows
+  your saved contacts at that company (`data/contacts.tsv`, matched like
+  `contact-lookup.mjs`) and the row's status history (`data/status-log.tsv`),
+  both read-only.
+- **Follow-ups** — the cadence from `followup-cadence.mjs`. **Done today** logs
+  a follow-up sent today in one click; **Log** records channel, contact and notes.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
   indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
 - **Scheduled scans** — save local zero-token or full-dataset scans and run due
