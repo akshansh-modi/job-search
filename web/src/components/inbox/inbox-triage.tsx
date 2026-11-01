@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Undo2 } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
@@ -18,6 +18,7 @@ import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 import { createInboxSkipActions, queueInboxSkip, reportSkipRejections, restoreSkippedUrls } from "@/lib/inbox-skip-client.mjs";
 import { useEvaluationOptions } from "@/components/evaluation-options";
 import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
+import { TRIAGE_VIEW_PARAM, inTriageView, triageViewFrom, triageViewQuery } from "@/lib/triage-view.mjs";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
@@ -30,7 +31,15 @@ type UndoNotice = { label: string; fn: () => Promise<void>; busy?: boolean; erro
 // role relevant — order is freshness with a single documented plug point.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { jobs, startJob } = useJobs();
+  // "Triage PASS" view: a URL filter over data/triage.json verdicts (?triage=PASS).
+  const triageView = triageViewFrom(searchParams.get(TRIAGE_VIEW_PARAM));
+  const setTriageView = (view: "PASS" | "MARGINAL" | "FAIL" | null) => {
+    const qs = triageViewQuery(searchParams.toString(), view);
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  };
   const { sections, setSections } = useEvaluationOptions();
   // Serialize skip/undo per URL so a fast Undo cannot lose the race to Skip.
   const skipChain = useRef(new Map<string, Promise<void>>());
@@ -126,9 +135,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // EVALUADA lookup: the latest evaluate worker per posting URL (running → badge).
   // AI triage results (data/triage.json); refetched when a triage run finishes.
   const [aiTriage, setAiTriage] = useState<Record<string, AiTriage>>({});
+  const [triageLoaded, setTriageLoaded] = useState(false);
   const triageJob = useMemo(() => jobs.filter((j) => j.kind === "triage").sort((a, b) => b.startedAt - a.startedAt)[0], [jobs]);
   useEffect(() => {
-    fetch("/api/triage").then((r) => r.json()).then((d) => setAiTriage(d.results ?? {})).catch(() => {});
+    fetch("/api/triage")
+      .then((r) => r.json())
+      .then((d) => setAiTriage(d.results ?? {}))
+      .catch(() => {})
+      .finally(() => setTriageLoaded(true));
   }, [triageJob?.status]);
   const untriaged = inbox.filter((j) => !j.done && !aiTriage[j.url]).length;
   const passUrls = inbox.filter((j) => !j.done && aiTriage[j.url]?.verdict === "PASS");
@@ -168,9 +182,10 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
         if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
         if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
+        if (!inTriageView(aiTriage[e.job.url]?.verdict, triageView)) return false;
         return true;
       }),
-    [enriched, hidden, within, sources, seniorities, locQ, kw],
+    [enriched, hidden, within, sources, seniorities, locQ, kw, aiTriage, triageView],
   );
 
   // 🔴 SINGLE ORDER PLUG POINT — freshness only (newest first_seen first; unknown last).
@@ -178,7 +193,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // touch relevance. This is the whole firewall in one line.
   const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
 
-  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
+  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || triageView != null;
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
@@ -400,7 +415,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         resultCount={filtered.length}
         totalCount={enriched.length - hiddenCount}
         anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
+        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); if (triageView) setTriageView(null); }}
       />
 
       {/* batch header: fresh slice by default, or the full filtered set */}
@@ -421,6 +436,20 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               Triage {untriaged} with AI
             </button>
           ) : null}
+          {(passUrls.length > 0 || triageView) && (
+            <button
+              type="button"
+              aria-pressed={triageView === "PASS"}
+              onClick={() => setTriageView(triageView === "PASS" ? null : "PASS")}
+              title="Show only the roles AI triage marked PASS. The link keeps the view."
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-xs font-medium max-sm:min-h-[44px]",
+                triageView === "PASS" ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:text-foreground",
+              )}
+            >
+              {triageView && triageView !== "PASS" ? `Triage ${triageView} · clear` : `Triage PASS${triageView === "PASS" ? " · clear" : ""}`}
+            </button>
+          )}
           {passUrls.length > 0 && (
             <button type="button" onClick={() => passUrls.forEach((j) => !isShortlisted(j.url) && save(j))} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
               Shortlist {passUrls.length} PASS
@@ -471,10 +500,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
             />
           ))}
         </ul>
+      ) : triageView && !triageLoaded ? (
+        <p role="status" className="mt-3 text-sm text-muted">Loading triage results…</p>
       ) : (
         <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
           <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Loosen the filters to see more of your inbox.</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
+            {triageView ? `No inbox role has a ${triageView} triage verdict. Run Triage with AI, or clear the view.` : "Loosen the filters to see more of your inbox."}
+          </p>
         </div>
       )}
 
