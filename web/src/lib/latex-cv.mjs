@@ -134,6 +134,43 @@ export async function persistLatexCv({ root, coreRoot = root, execPath, paths, t
   if (paths.reportNum && pages === 1) {
     const mark = await run(execPath, [path.join(coreRoot, "mark-pdf-ready.mjs"), paths.reportNum], { cwd: coreRoot });
     if (mark.code !== 0) warnings.push("Could not mark the tracker's PDF column — run mark-pdf-ready.mjs by hand.");
+    try { await registerLatexPdf({ root, coreRoot, reportNum: paths.reportNum, pdf: paths.pdf }); }
+    catch (e) { warnings.push(`Could not add the CV to data/pdf-index.tsv: ${String(e?.message ?? e).slice(0, 200)}`); }
   }
   return { ok: true, warnings, pages, pdf: rel };
+}
+
+/** Pure: index lines with this report's CV row replaced by one pointing at `relPdf`. */
+export function upsertPdfIndexRow(text, reportNum, relPdf, date) {
+  const n = Number(reportNum);
+  const kept = String(text ?? "").split(/\r?\n/).filter((l) => {
+    if (!l.trim() || l.startsWith("#")) return false;
+    const c = l.split("\t");
+    const kind = (c[5] ?? "").trim().toLowerCase() || "cv";
+    return !(/^\d+$/.test(c[0]?.trim() ?? "") && Number(c[0]) === n && kind === "cv");
+  });
+  kept.push([String(reportNum).padStart(3, "0"), relPdf, "", "latex", date, "cv"].join("\t"));
+  return "# report\tpdf\thtml\tformat\tdate\tkind - written by generate-pdf.mjs, do not edit\n" + kept.join("\n") + "\n";
+}
+
+/**
+ * Record a LaTeX CV in data/pdf-index.tsv, the file every "is there a CV for this
+ * report?" reader trusts (report page, apply flow, outcome.mjs). generate-pdf.mjs
+ * only indexes HTML-rendered PDFs, so without this a LaTeX CV under
+ * output/{company}/{role}/ reads as missing. Same path resolver, lock and atomic
+ * write as generate-pdf.mjs's updatePDFManifest, loaded from the checkout.
+ */
+export async function registerLatexPdf({ root, coreRoot = root, reportNum, pdf }) {
+  const { pathToFileURL } = await import("node:url");
+  const tu = await import(/* webpackIgnore: true */ pathToFileURL(path.join(coreRoot, "tracker-utils.mjs")).href);
+  const { withPipelineLock } = await import(/* webpackIgnore: true */ pathToFileURL(path.join(coreRoot, "pipeline-lock.mjs")).href);
+  const indexPath = tu.resolvePdfIndexPath(tu.resolveTrackerPath(root));
+  const relPdf = path.relative(root, path.resolve(pdf)).split(path.sep).join("/");
+  if (!relPdf.startsWith("output/")) throw new Error(`${relPdf} is not under output/`);
+  fs.mkdirSync(path.dirname(indexPath), { recursive: true });
+  await withPipelineLock(indexPath, () => {
+    const text = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
+    tu.writeFileAtomic(indexPath, upsertPdfIndexRow(text, reportNum, relPdf, new Date().toISOString().slice(0, 10)));
+  });
+  return relPdf;
 }
