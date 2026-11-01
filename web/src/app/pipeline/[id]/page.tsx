@@ -11,6 +11,8 @@ import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { tailoredCvOnDisk } from "@/lib/tailored-cv-ready.mjs";
 import { parseReport } from "@/lib/format";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { latexCvPath, registerLatexPdf } from "@/lib/latex-cv.mjs";
 
 // Same filter /api/cv-pdf applies, so a directory or a symlink out of output/
 // never marks a CV ready that the View link would refuse.
@@ -43,7 +45,26 @@ export default async function ReportPage({ params, searchParams }: {
   // identity to match on, and guessing one from the id would surface another
   // offer's cover.
   const coverReady = (await resolveTailoredCover(app?.company, id)) !== null;
-  const indexStatus = (await pdfPathStatusForReport(id)).status;
+  const indexed = await pdfPathStatusForReport(id);
+  let indexStatus = indexed.status;
+  const reportNum = reportNumberFor(id, app, report?.file ?? null);
+  // fork: a LaTeX CV (output/{company}/{role}/resume_*.pdf) is this report's CV.
+  // One built before pdf-index.tsv knew about LaTeX CVs is found from the
+  // report's **PDF:** line and registered here, so the View link, the apply
+  // flow and chrome-fill all resolve it through the index like any other CV.
+  const root = careerOpsRoot();
+  const latexCv = indexed.status === "rejected" || indexed.status === "invalid"
+    ? null
+    : latexCvPath({ root, reportContent: report?.content, indexedPath: indexed.status === "found" ? indexed.path : null });
+  let latexCvUnindexed = false;
+  if (latexCv && indexed.status === "not-found" && reportNum != null) {
+    try {
+      await registerLatexPdf({ root, coreRoot: resolveCodeRoot(process.cwd(), process.env), reportNum: String(reportNum), pdf: path.join(root, latexCv) });
+      indexStatus = "found";
+    } catch {
+      latexCvUnindexed = true;
+    }
+  }
   // Same name the View link puts in ?company=, so a slug match here is the file that link would open.
   const companyName = app?.company || parseReport(report?.content ?? "").title || "";
   const pdfFileReady = tailoredCvOnDisk({
@@ -77,7 +98,9 @@ export default async function ReportPage({ params, searchParams }: {
       coverReady={coverReady}
       backHref={`/pipeline${query ? `?${query}` : ""}`}
       applyHref={`/pipeline/${encodeURIComponent(id)}/apply${query ? `?${query}` : ""}`}
-      reportNum={reportNumberFor(id, app, report?.file ?? null)}
+      reportNum={reportNum}
+      latexCv={latexCv}
+      latexCvUnindexed={latexCvUnindexed}
       contacts={contacts}
       statusHistory={statusHistory}
     />

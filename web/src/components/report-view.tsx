@@ -62,6 +62,8 @@ export function ReportView({
   reportNum = null,
   contacts = null,
   statusHistory = null,
+  latexCv = null,
+  latexCvUnindexed = false,
 }: {
   id: string;
   app: Application | null;
@@ -85,6 +87,12 @@ export function ReportView({
   contacts?: CompanyContacts | null;
   /** This row's status-log.tsv changes; null without a row. */
   statusHistory?: StatusHistoryResult | null;
+  /** Root-relative path of this report's LaTeX CV, when it has one. The HTML
+   *  CV controls (Generate, regenerate, CV Studio) are hidden then: each would
+   *  replace the LaTeX CV as this report's CV in pdf-index.tsv. */
+  latexCv?: string | null;
+  /** The LaTeX CV exists but could not be added to pdf-index.tsv. */
+  latexCvUnindexed?: boolean;
 }) {
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
@@ -98,7 +106,7 @@ export function ReportView({
   const quietApply = applyCtaQuiet({ score, legitimacy: meta?.legitimacy });
   const applyUrl = httpUrl(url);
   const pdfReady = pdfFileReady;
-  const pdfMarkedWithoutFile = trackerMarkedPdf && !pdfFileReady;
+  const pdfMarkedWithoutFile = trackerMarkedPdf && !pdfFileReady && !latexCv;
   const company = app ? companyPresentation(app) : null;
   const companyName = company?.label ?? app?.company ?? meta?.title ?? id;
   const track = (
@@ -132,7 +140,19 @@ export function ReportView({
 
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
           {app && <StatusSelect n={id} current={app.status} />}
-          <GeneratePdfButton n={id} company={app?.company || meta?.title || id} pdfReady={pdfReady} />
+          {latexCv ? (
+            <a
+              href={`/api/cv-pdf?n=${encodeURIComponent(String(reportNum ?? id))}`}
+              target="_blank"
+              rel="noreferrer"
+              title={latexCv}
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-800 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
+            >
+              <FileText className="size-3.5" /> View LaTeX CV
+            </a>
+          ) : (
+            <GeneratePdfButton n={id} company={app?.company || meta?.title || id} pdfReady={pdfReady} />
+          )}
           {app && report && <CoverDraftButton n={id} company={companyName} />}
           {app && report && <LatexCvButton n={id} company={companyName} />}
           {app && report && <EmailDraftButton n={id} company={companyName} />}
@@ -148,7 +168,13 @@ export function ReportView({
           <MarkPdfReadyButton reportNum={reportNum} ready={pdfFileReady || trackerMarkedPdf} />
           {pdfMarkedWithoutFile && (
             <p className="basis-full text-sm text-muted">
-              The tracker marks a tailored CV, but there is no file in output/. Choose Generate tailored CV.
+              The tracker marks a tailored CV, but there is no file in output/. Choose LaTeX CV to build one.
+            </p>
+          )}
+          {latexCvUnindexed && (
+            <p className="basis-full text-sm text-muted">
+              {latexCv} could not be added to data/pdf-index.tsv. Run{" "}
+              <code className="text-foreground">node web/scripts/register-latex-pdf.mjs --backfill</code>.
             </p>
           )}
           {coverReady && (

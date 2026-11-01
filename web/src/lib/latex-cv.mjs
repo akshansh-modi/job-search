@@ -140,6 +140,31 @@ export async function persistLatexCv({ root, coreRoot = root, execPath, paths, t
   return { ok: true, warnings, pages, pdf: rel };
 }
 
+/** Where persistLatexCv puts a CV: output/{company}/{role}/resume_{name}.pdf. */
+const LATEX_PDF_RE = /^output\/[^/]+\/[^/]+\/resume_[^/]+\.pdf$/;
+
+/**
+ * Root-relative path of this report's LaTeX CV, or null when it has none.
+ *
+ * An index row decides when there is one (`indexedPath`, absolute or
+ * root-relative): a LaTeX path there is the CV, and an HTML one means the user
+ * chose the HTML CV for this report. With no index row, the report's own
+ * `**PDF:**` line decides, which is how CVs built before the index existed are
+ * found. The file has to exist under output/.
+ *
+ * @param {{root: string, reportContent?: string | null, indexedPath?: string | null, exists?: (p: string) => boolean}} args
+ * @returns {string | null}
+ */
+export function latexCvPath({ root, reportContent = null, indexedPath = null, exists = fs.existsSync }) {
+  const toRel = (p) => {
+    const rel = path.relative(root, path.resolve(root, p)).split(path.sep).join("/");
+    return LATEX_PDF_RE.test(rel) && !rel.split("/").includes("..") && exists(path.join(root, rel)) ? rel : null;
+  };
+  if (indexedPath) return toRel(indexedPath);
+  const line = String(reportContent ?? "").match(/^\*\*PDF:\*\*\s*(\S+\.pdf)\s*$/m);
+  return line ? toRel(line[1]) : null;
+}
+
 /** Pure: index lines with this report's CV row replaced by one pointing at `relPdf`. */
 export function upsertPdfIndexRow(text, reportNum, relPdf, date) {
   const n = Number(reportNum);
