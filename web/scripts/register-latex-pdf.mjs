@@ -23,8 +23,8 @@ if (args[0] === "--backfill") {
   for (const f of fs.readdirSync(path.join(root, "reports"))) {
     const m = f.match(/^(\d+)-.*\.md$/);
     if (!m) continue;
-    const line = fs.readFileSync(path.join(root, "reports", f), "utf8").match(/^\*\*PDF:\*\*\s*(\S+\.pdf)\s*$/m);
-    if (line && line[1].startsWith("output/") && fs.existsSync(path.join(root, line[1]))) jobs.push([m[1], path.join(root, line[1])]);
+    const line = fs.readFileSync(path.join(root, "reports", f), "utf8").match(/^\*\*PDF:\*\*[^\n]*?(output\/[^\s`)]+\.pdf)/m);
+    if (line && fs.existsSync(path.join(root, line[1]))) jobs.push([m[1], path.join(root, line[1])]);
   }
 } else {
   if (!/^\d+$/.test(args[0]) || !args[1]) { console.error("usage: register-latex-pdf.mjs <report#> <pdf>"); process.exit(1); }

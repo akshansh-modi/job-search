@@ -161,7 +161,7 @@ export function latexCvPath({ root, reportContent = null, indexedPath = null, ex
     return LATEX_PDF_RE.test(rel) && !rel.split("/").includes("..") && exists(path.join(root, rel)) ? rel : null;
   };
   if (indexedPath) return toRel(indexedPath);
-  const line = String(reportContent ?? "").match(/^\*\*PDF:\*\*\s*(\S+\.pdf)\s*$/m);
+  const line = String(reportContent ?? "").match(/^\*\*PDF:\*\*[^\n]*?(output\/[^\s`)]+\.pdf)/m);
   return line ? toRel(line[1]) : null;
 }
 

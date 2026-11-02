@@ -40,3 +40,10 @@ test("latexCvPath: with no index row, the report's **PDF:** line decides", () =>
   assert.equal(latexCvPath({ root, reportContent: "**PDF:** ❌\n", exists: () => true }), null);
   assert.equal(latexCvPath({ root, reportContent: null }), null);
 });
+
+test("latexCvPath reads a PDF line written as 'generated (`output/...pdf`)'", async () => {
+  const { latexCvPath } = await import("../../src/lib/latex-cv.mjs");
+  const md = "**PDF:** generated (`output/iris-software/java-engineer/resume_akshansh_modi.pdf`)\n";
+  assert.equal(latexCvPath({ root: "/r", reportContent: md, exists: () => true }), "output/iris-software/java-engineer/resume_akshansh_modi.pdf");
+  assert.equal(latexCvPath({ root: "/r", reportContent: "**PDF:** pending (not generated)\n", exists: () => true }), null);
+});
