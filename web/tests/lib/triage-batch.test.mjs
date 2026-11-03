@@ -22,6 +22,14 @@ test("prompt quotes postings as data and points at local JD files", () => {
   assert.match(p, /triage_threshold is 3\.5/);
 });
 
+test("triage mode is read from the code checkout on a split layout; _brief.md stays in the data root", () => {
+  const items = [{ id: 1, url: "u", company: "A", role: "R", jd: null }];
+  const split = buildTriagePrompt({ items, threshold: 3.5, codeRoot: "/opt/career-ops" });
+  assert.ok(split.includes(JSON.stringify(path.join("/opt/career-ops", "modes", "triage.md"))));
+  assert.match(split, /Read modes\/_brief\.md once/);
+  assert.match(buildTriagePrompt({ items, threshold: 3.5 }), /Read modes\/triage\.md and follow it/);
+});
+
 test("only known ids and valid verdict lines are kept, and results are tracked", () => {
   const body = "[1] TRIAGE: PASS | Acme | SDE | 4.2/5 | Java, 0-2 yrs, Gurugram\n[9] TRIAGE: PASS | X | Y | 5/5 | not ours\n[2] TRIAGE: MAYBE | B | C | 3/5 | bad verdict";
   const parsed = parseTriageLines(body, new Set([1, 2]));
@@ -36,4 +44,14 @@ test("only known ids and valid verdict lines are kept, and results are tracked",
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the scanner's yrs label reaches the triage prompt; 'none stated' is dropped", async () => {
+  const { inboxYears, buildTriagePrompt } = await import("../../src/lib/triage-batch.mjs");
+  const years = inboxYears("- [ ] https://x.test/1 | A | Dev | Gurugram | posted: 2026-10-29 | yrs: 8-10\n- [ ] https://x.test/2 | B | Dev | Noida | yrs: none stated\n");
+  assert.equal(years.get("https://x.test/1"), "8-10");
+  assert.equal(years.has("https://x.test/2"), false);
+  const p = buildTriagePrompt({ items: [{ id: 1, url: "https://x.test/1", company: "A", role: "Dev", yrs: "8-10", jd: null }], threshold: 3 });
+  assert.match(p, /"yrs":"8-10"/);
+  assert.match(p, /experience rules/);
 });

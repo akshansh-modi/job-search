@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, findReportFile } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { findAttachment, resolveEmailPaths, saveGmailDraft } from "@/lib/email-draft.mjs";
 import { readJsonObject } from "@/lib/json-body";
 
@@ -31,6 +32,6 @@ export async function POST(req: Request) {
   const body = await readJsonObject<{ n?: string }>(req);
   const paths = pathsFor(body?.n ?? null);
   if (!paths) return Response.json({ error: "No report for that application." }, { status: 400 });
-  const r = await saveGmailDraft({ root: careerOpsRoot(), paths });
+  const r = await saveGmailDraft({ coreRoot: resolveCodeRoot(process.cwd(), process.env), paths });
   return Response.json(r, { status: r.ok ? 200 : 500 });
 }

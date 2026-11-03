@@ -108,14 +108,18 @@ export function findAttachment(dir) {
   return pdf ? path.join(dir, pdf) : null;
 }
 
-/** Run save-draft.py (IMAP APPEND to Gmail Drafts). Never sends. */
-export function saveGmailDraft({ root, paths }) {
+/**
+ * Run save-draft.py (IMAP APPEND to Gmail Drafts). Never sends.
+ * `coreRoot` is the code checkout that holds save-draft.py (and the .env it reads
+ * next to itself), which is not the data root on a split-layout install.
+ */
+export function saveGmailDraft({ coreRoot, paths }) {
   if (!fs.existsSync(paths.txt) || !fs.existsSync(paths.meta)) return Promise.resolve({ ok: false, error: "Draft the email first." });
   const { to, subject } = JSON.parse(fs.readFileSync(paths.meta, "utf8"));
   const attach = findAttachment(paths.dir);
-  const args = ["save-draft.py", "--to", to, "--subject", subject, "--body-file", paths.txt, ...(attach ? ["--attach", attach] : [])];
+  const args = [path.join(coreRoot, "save-draft.py"), "--to", to, "--subject", subject, "--body-file", paths.txt, ...(attach ? ["--attach", attach] : [])];
   return new Promise((resolve) => {
-    execFile("python3", args, { cwd: root, timeout: 60_000, windowsHide: true }, (err, stdout, stderr) => {
+    execFile("python3", args, { cwd: coreRoot, timeout: 60_000, windowsHide: true }, (err, stdout, stderr) => {
       const out = String(stdout) + String(stderr);
       if (err) return resolve({ ok: false, error: out.trim().split("\n").pop() || err.message });
       resolve({ ok: true, link: (out.match(/Open:\s*(\S+)/) ?? [])[1] ?? null, attached: attach ? path.basename(attach) : null });

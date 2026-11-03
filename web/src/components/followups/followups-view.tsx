@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
+import { useListSearch } from "@/lib/use-list-search";
 import { CalendarClock, Check, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -26,6 +28,7 @@ import { cn } from "@/lib/cn";
 import { FollowupsTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { selectUpcomingFollowups } from "@/lib/core/followup-view.mjs";
+import { followupsSummarySlot } from "@/lib/followups-summary-slot.mjs";
 import { loggedOn, QUICK_LOG_CHANNEL } from "@/lib/followup-log.mjs";
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
@@ -115,32 +118,26 @@ export function FollowupsView() {
   const sortKey: SortKey | null = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : null;
   const dir = (params.get("dir") === "-1" ? -1 : 1) as 1 | -1;
 
-  const [q, setQ] = useState(params.get("q") ?? "");
-  const lastUrlQ = useRef(params.get("q") ?? "");
-  useEffect(() => {
-    const urlQ = params.get("q") ?? "";
-    if (urlQ !== lastUrlQ.current) {
-      lastUrlQ.current = urlQ;
-      setQ(urlQ);
-    }
-  }, [params]);
-
-  const setParams = useCallback(
+  const qRef = useRef(params.get("q") ?? "");
+  const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
-      const sp = new URLSearchParams(params.toString());
-      for (const [k, v] of Object.entries(updates)) {
-        if (v == null || v === "") sp.delete(k);
-        else sp.set(k, String(v));
+      const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
+      if (qs === params.toString()) return false;
+      const href = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Search already filtered the rows. A transition would hide them.
+      if (isSearchOnlyWrite(updates)) {
+        router.replace(href, { scroll: false });
+        return true;
       }
-      const qs = sp.toString();
-      if (qs === params.toString()) return;
       startRouteProgress();
       startTransition(() => {
-        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+        router.replace(href, { scroll: false });
       });
+      return true;
     },
     [params, router, pathname, startTransition],
   );
+  const { q, setQ, setParams } = useListSearch(params, commitParams, qRef);
 
   const entries = useMemo(() => (data?.available ? data.entries : []), [data]);
   const upcoming = useMemo(() => {
@@ -260,7 +257,18 @@ export function FollowupsView() {
         </div>
       </div>
 
-      {meta && !filtering && <NarrativeCard meta={meta} entries={entries} />}
+      {followupsSummarySlot({
+        pending: !data,
+        filtering,
+        hasSummary: Boolean(meta),
+        due: (meta?.overdue ?? 0) + (meta?.urgent ?? 0),
+      }) === "reserved" ? (
+        <div className="mt-5 rounded-xl border border-transparent px-4 py-3 text-sm leading-5" aria-hidden="true">
+          <div className="h-10" />
+        </div>
+      ) : (
+        meta && !filtering && <NarrativeCard meta={meta} entries={entries} />
+      )}
 
       {/* urgency filter */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
@@ -283,9 +291,9 @@ export function FollowupsView() {
 
       {actionError && <p className="mt-3 text-xs text-red-500">{actionError}</p>}
 
-      {!data ? null : !data.available ? (
+      {data && !data.available ? (
         <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
-      ) : !isPending && filtered.length === 0 ? (
+      ) : data && !isPending && filtered.length === 0 ? (
         filtering ? (
           <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />
         ) : (
@@ -321,8 +329,8 @@ export function FollowupsView() {
                 <th className="px-2.5 py-2.5 font-medium">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border" aria-busy={isPending}>
-              {isPending ? <FollowupsTableRowsSkeleton /> : filtered.map((e) => (
+            <tbody className="divide-y divide-border" aria-busy={!data || isPending}>
+              {!data || isPending ? <FollowupsTableRowsSkeleton /> : filtered.map((e) => (
                 <FollowupRow
                   key={e.num}
                   entry={e}
@@ -361,7 +369,7 @@ export function FollowupsView() {
 
       {/* Below the due list: a follow-up you can still send outranks a company
           that has already stopped replying. */}
-      <QuietCompanies />
+      {data && <QuietCompanies />}
 
       {dialogFor && <LogDialog entry={dialogFor} onClose={() => setDialogFor(null)} onLogged={refetch} />}
       {pinFor && <NextDateDialog entry={pinFor} onClose={() => setPinFor(null)} onChanged={refetch} />}
@@ -375,10 +383,7 @@ function NarrativeCard({ meta, entries }: { meta: CadenceMetadata; entries: Cade
   const due = meta.overdue + meta.urgent;
   if (due <= 0) return null;
 
-  const pressing = [...entries]
-    .filter((e) => e.urgency === "overdue" || e.urgency === "urgent")
-    .sort((a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || b.daysSinceApplication - a.daysSinceApplication)
-    .slice(0, 4);
+  const pressing = entries.filter((e) => e.urgency === "overdue" || e.urgency === "urgent").slice(0, 4);
 
   const parts: string[] = [];
   if (meta.overdue > 0) parts.push(`Overdue follow-ups: ${meta.overdue}`);
@@ -473,7 +478,7 @@ function FollowupRow({
           {e.daysUntilNext == null ? (
             <span className="text-faint">—</span>
           ) : (
-            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-600 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
+            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-700 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
               {relativeDays(e.daysUntilNext)}
             </span>
           )}
@@ -494,7 +499,7 @@ function FollowupRow({
         <td className="whitespace-nowrap px-2.5 py-3">
           <span className="inline-flex items-center gap-0.5">
             {doneToday ? (
-              <span className="inline-flex items-center gap-1 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-400" title="A follow-up is already logged for today">
+              <span className="inline-flex items-center gap-1 px-2 py-1 text-xs text-emerald-800 dark:text-emerald-400" title="A follow-up is already logged for today">
                 <Check className="size-3.5" /> Logged today
               </span>
             ) : (

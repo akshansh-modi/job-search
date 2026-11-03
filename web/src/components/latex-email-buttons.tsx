@@ -44,7 +44,7 @@ export function LatexCvButton({ n, company }: { n: string; company: string }) {
         <FileCode2 className="size-3.5" /> {job?.status === "done" ? "Rebuild LaTeX CV" : "LaTeX CV"}
       </button>
       {job?.status === "done" && (
-        <Link href={`/jobs/${job.id}`} className="text-xs text-emerald-700 hover:underline dark:text-emerald-400">done — see log</Link>
+        <Link href={`/jobs/${job.id}`} className="text-xs text-emerald-800 hover:underline dark:text-emerald-400">done — see log</Link>
       )}
       {job?.status === "error" && <Failure jobId={job.id} what="LaTeX CV" />}
     </span>
@@ -156,7 +156,7 @@ export function EmailDraftButton({ n, company }: { n: string; company: string })
             <span className="text-xs text-muted">Saves a draft only. Nothing is sent.</span>
           </div>
           {saved?.ok && (
-            <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+            <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-400">
               Saved.{" "}
               {saved.link && <a href={saved.link} target="_blank" rel="noreferrer" className="underline">Open in Gmail</a>}
             </p>

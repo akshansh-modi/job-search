@@ -195,7 +195,33 @@ async function main() {
   }
 }
 
+const USAGE = `Usage: node web/scripts/mongo-worker.mjs [--sync-only]
+
+One pass of the online worker: replay queued commands against the local web
+app, then mirror changed user files to MongoDB. Needs MONGODB_URI in
+web/.env.local.
+
+  --sync-only   Mirror files only; do not run queued commands.
+  --help, -h    Show this help and exit without connecting.`;
+
+/** Unknown flags are refused, so a typo never runs a pass that was not asked for. */
+export function parseWorkerArgs(argv) {
+  const help = argv.includes("--help") || argv.includes("-h");
+  const unknown = argv.filter((a) => !["--sync-only", "--help", "-h"].includes(a));
+  return { help, syncOnly: argv.includes("--sync-only"), unknown };
+}
+
 if (isMainModule(import.meta.url)) {
+  // Before the env file or any connection: --help must not run a pass.
+  const args = parseWorkerArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+  if (args.unknown.length) {
+    console.error(`Unknown option: ${args.unknown[0]}\n\n${USAGE}`);
+    process.exit(1);
+  }
   main().catch((e) => {
     // A driver error can echo the URI; never let it reach the log.
     console.error(`${new Date().toISOString()} worker failed: ${String(e?.message ?? e).replace(/mongodb(\+srv)?:\/\/[^\s]*/g, "mongodb://***")}`);

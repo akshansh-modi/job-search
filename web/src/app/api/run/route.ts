@@ -10,6 +10,7 @@ import { localISODate } from "@/lib/followups";
 import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
@@ -32,7 +33,7 @@ import { LATEX_TAG, buildLatexPrompt, persistLatexCv, resolveLatexPaths } from "
 import { EMAIL_TAG, buildEmailPrompt, findAttachment, isOwnAddress, parseEmailBrief, persistEmail, resolveEmailPaths } from "@/lib/email-draft.mjs";
 import { buildChromeFillPrompt, parseChromeFillBrief, postingUrlForReport } from "@/lib/chrome-fill.mjs";
 import { choiceFor, modelArgs } from "@/lib/flows.mjs";
-import { TRIAGE_MAX, TRIAGE_TAG, buildTriagePrompt, jdFileFor, persistTriage, readTriage, triageThreshold } from "@/lib/triage-batch.mjs";
+import { TRIAGE_MAX, TRIAGE_TAG, buildTriagePrompt, inboxYears, jdFileFor, persistTriage, readTriage, triageThreshold } from "@/lib/triage-batch.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,15 +82,18 @@ export async function POST(req: Request) {
   const lang = readLanguageConfig();
   const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", cover: "modes/cover.md", "latex-cv": "generate-latex.mjs", "email-draft": "save-draft.py", triage: "modes/triage.md" };
   const required = needsScript[kind];
+  // Scripts and system modes live in the code checkout, which on a split-layout
+  // install is not the data root (cv.md, reports/ and output stay under that).
+  const codeRoot = resolveCodeRoot(process.cwd(), process.env);
   // CAREER_OPS_ROOT is runtime user data, not a build input. Tracing this
   // dynamic path would copy the whole web project into every server bundle.
   const requiredPath = required
-    ? path.join(/* turbopackIgnore: true */ careerOpsRoot(), required)
+    ? path.join(/* turbopackIgnore: true */ codeRoot, required)
     : "";
   if (required && !fs.existsSync(/* turbopackIgnore: true */ requiredPath)) {
     return new Response(
       JSON.stringify({
-        error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
+        error: `This needs a complete career-ops checkout (${required}). The career-ops code checkout is incomplete — point CAREER_OPS_CODE_ROOT at a full checkout.`,
       }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
@@ -100,7 +104,8 @@ export async function POST(req: Request) {
   let evaluationInstructions: string | null = null;
   if (evaluation?.ok && !evaluation.full) {
     try {
-      const root = careerOpsRoot();
+      // modes/ and batch/ are system files: they live in the code checkout.
+      const root = codeRoot;
       evaluationInstructions = selectedEvaluationInstructions({
         mode: fs.readFileSync(/* turbopackIgnore: true */ requiredPath, "utf8"),
         canonicalMode: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "modes/oferta.md"), "utf8"),
@@ -195,14 +200,17 @@ export async function POST(req: Request) {
   }
 
   // triage: every pending inbox role not triaged yet (input "inbox"), capped per run.
-  let triageItems: { id: number; url: string; company: string; role: string; location?: string; jd: string | null }[] = [];
+  let triageItems: { id: number; url: string; company: string; role: string; location?: string; yrs?: string; jd: string | null }[] = [];
   if (kind === "triage") {
     const root = careerOpsRoot();
     const done = readTriage(root).results ?? {};
+    let pipelineMd = "";
+    try { pipelineMd = fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "data/pipeline.md"), "utf8"); } catch { /* no inbox */ }
+    const years = inboxYears(pipelineMd);
     triageItems = readInbox()
       .filter((j) => !j.done && !done[j.url])
       .slice(0, TRIAGE_MAX)
-      .map((j, i) => ({ id: i + 1, url: j.url, company: j.company, role: j.role, location: j.location, jd: jdFileFor(root, j.url) }));
+      .map((j, i) => ({ id: i + 1, url: j.url, company: j.company, role: j.role, location: j.location, yrs: years.get(j.url), jd: jdFileFor(root, j.url) }));
     if (!triageItems.length) return bad("Every pending inbox role is already triaged.");
   }
 
@@ -230,7 +238,7 @@ export async function POST(req: Request) {
   // (#4034). Only pdf fills a template, so nothing else pays for the lookup.
   // The root is passed, not re-derived: a relative CAREER_OPS_PROFILE resolves
   // against it, and `process.cwd()` here is `<core>/web` (see cv-template.mjs).
-  const cvTemplate = kind === "pdf" ? await resolveCvTemplate(careerOpsRoot()) : undefined;
+  const cvTemplate = kind === "pdf" ? await resolveCvTemplate(codeRoot) : undefined;
   // evaluate: a JD the scanner already saved (jds/jobspy) counts as pasted text, so a
   // LinkedIn posting that won't load headless still gets evaluated (AGENTS.md LinkedIn guard).
   const savedJd = kind === "evaluate" ? jdFileFor(careerOpsRoot(), input) : null;
@@ -240,7 +248,7 @@ export async function POST(req: Request) {
   const basePrompt = chromeFillPrompt
     ? chromeFillPrompt
     : kind === "triage"
-    ? buildTriagePrompt({ items: triageItems, threshold: triageThreshold(careerOpsRoot()) })
+    ? buildTriagePrompt({ items: triageItems, threshold: triageThreshold(careerOpsRoot()), codeRoot })
     : latexPaths?.ok
     ? buildLatexPrompt({ n: input, reportFile: tagReportFile, baseTexContent: fs.readFileSync(/* turbopackIgnore: true */ latexPaths.paths.baseTex, "utf8"), profile: profileRef(careerOpsRoot()), memory: readMemory() })
     : emailBrief?.ok
@@ -253,6 +261,8 @@ export async function POST(req: Request) {
     postedAt,
     lang,
     cvTemplate,
+    // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
+    codeRoot,
     reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
     coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
     profile: profileRef(careerOpsRoot()),
@@ -569,6 +579,7 @@ export async function POST(req: Request) {
             spawnFn: spawn,
             execPath: process.execPath,
             root: careerOpsRoot(),
+            coreRoot: resolveCodeRoot(process.cwd(), process.env),
             markdown,
             url: input,
             today,
@@ -603,7 +614,7 @@ export async function POST(req: Request) {
           const result = await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
-            root: careerOpsRoot(),
+            coreRoot: resolveCodeRoot(process.cwd(), process.env),
             pdfPaths: paths,
             format,
             reportNum: paths.reportNum,
@@ -730,7 +741,7 @@ export async function POST(req: Request) {
             const paths = latexPaths.paths;
             latexPersistPromise = (async () => {
               try {
-                const r = await persistLatexCv({ root: careerOpsRoot(), execPath: process.execPath, paths, tex: envelope.body, onStatus: (label: string) => send({ type: "status", label }) });
+                const r = await persistLatexCv({ root: careerOpsRoot(), coreRoot: codeRoot, execPath: process.execPath, paths, tex: envelope.body, onStatus: (label: string) => send({ type: "status", label }) });
                 sendWarnings(r.warnings);
                 if (!r.ok) send({ type: "error", msg: String(r.error).slice(0, 300) });
                 else {

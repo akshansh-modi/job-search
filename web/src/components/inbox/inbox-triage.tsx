@@ -1,21 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Undo2 } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
+import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type AiTriage, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
-import { createInboxSkipActions, queueInboxSkip } from "@/lib/inbox-skip-client.mjs";
+import { createInboxSkipActions, queueInboxSkip, reportSkipRejections, restoreSkippedUrls } from "@/lib/inbox-skip-client.mjs";
 import { useEvaluationOptions } from "@/components/evaluation-options";
 import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
+import { TRIAGE_VIEW_PARAM, inTriageView, triageViewFrom, triageViewQuery } from "@/lib/triage-view.mjs";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
@@ -28,7 +31,15 @@ type UndoNotice = { label: string; fn: () => Promise<void>; busy?: boolean; erro
 // role relevant — order is freshness with a single documented plug point.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { jobs, startJob } = useJobs();
+  // "Triage PASS" view: a URL filter over data/triage.json verdicts (?triage=PASS).
+  const triageView = triageViewFrom(searchParams.get(TRIAGE_VIEW_PARAM));
+  const setTriageView = (view: "PASS" | "MARGINAL" | "FAIL" | null) => {
+    const qs = triageViewQuery(searchParams.toString(), view);
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  };
   const { sections, setSections } = useEvaluationOptions();
   // Serialize skip/undo per URL so a fast Undo cannot lose the race to Skip.
   const skipChain = useRef(new Map<string, Promise<void>>());
@@ -47,6 +58,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [shortlist, setShortlist] = useState<ShortItem[]>([]);
   const [hidden, setHidden] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [cursor, setCursor] = useState(-1);
   const [undo, setUndo] = useState<UndoNotice | null>(null);
   const [writeError, setWriteError] = useState("");
   const [restoring, setRestoring] = useState(false);
@@ -123,9 +135,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // EVALUADA lookup: the latest evaluate worker per posting URL (running → badge).
   // AI triage results (data/triage.json); refetched when a triage run finishes.
   const [aiTriage, setAiTriage] = useState<Record<string, AiTriage>>({});
+  const [triageLoaded, setTriageLoaded] = useState(false);
   const triageJob = useMemo(() => jobs.filter((j) => j.kind === "triage").sort((a, b) => b.startedAt - a.startedAt)[0], [jobs]);
   useEffect(() => {
-    fetch("/api/triage").then((r) => r.json()).then((d) => setAiTriage(d.results ?? {})).catch(() => {});
+    fetch("/api/triage")
+      .then((r) => r.json())
+      .then((d) => setAiTriage(d.results ?? {}))
+      .catch(() => {})
+      .finally(() => setTriageLoaded(true));
   }, [triageJob?.status]);
   const untriaged = inbox.filter((j) => !j.done && !aiTriage[j.url]).length;
   const passUrls = inbox.filter((j) => !j.done && aiTriage[j.url]?.verdict === "PASS");
@@ -165,9 +182,10 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
         if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
         if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
+        if (!inTriageView(aiTriage[e.job.url]?.verdict, triageView)) return false;
         return true;
       }),
-    [enriched, hidden, within, sources, seniorities, locQ, kw],
+    [enriched, hidden, within, sources, seniorities, locQ, kw, aiTriage, triageView],
   );
 
   // 🔴 SINGLE ORDER PLUG POINT — freshness only (newest first_seen first; unknown last).
@@ -175,10 +193,18 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // touch relevance. This is the whole firewall in one line.
   const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
 
-  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
+  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || triageView != null;
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
+
+  useEffect(() => {
+    setCursor((index) => (visible.length === 0 ? -1 : index < 0 ? index : Math.min(index, visible.length - 1)));
+  }, [visible.length]);
+  useEffect(() => {
+    if (cursor < 0) return;
+    document.querySelector(`[data-triage-index="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [cursor]);
 
   const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
 
@@ -207,6 +233,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   };
   const skip = (job: InboxJob) => {
     setWriteError("");
+    setSelected((current) => selectionWithout(current, job.url));
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
     const actions = createInboxSkipActions((done) => persistSkip(job.url, done), () => {
       setHidden((h) => h.filter((u) => u !== job.url));
@@ -252,6 +279,107 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     if (add.length) setShortlist((s) => [...s, ...add]);
     setSelected(new Set());
   };
+  const skipUrls = (jobs: InboxJob[], label: string) => {
+    const urls = [...new Set(jobs.map((job) => job.url))];
+    if (urls.length === 0) return;
+    setWriteError("");
+    setHidden((h) => [...h, ...urls.filter((url) => !h.includes(url))]);
+    setSelected(new Set());
+    const notice: UndoNotice = {
+      label,
+      fn: async () => {
+        await restoreSkippedUrls(urls, (url) => persistSkip(url, false), (url) => {
+          setHidden((h) => h.filter((item) => item !== url));
+        });
+      },
+    };
+    setUndo(notice);
+    // Each failure shows as soon as that request rejects. A hung request must
+    // not hide it. The page still refreshes once, after the whole batch settles.
+    const alreadyHidden = new Set(hidden);
+    void reportSkipRejections(
+      urls.map((url) => queueInboxSkip(skipChain.current, url, true)),
+      (index) => {
+        const url = urls[index];
+        if (!alreadyHidden.has(url)) setHidden((h) => h.filter((item) => item !== url));
+        setWriteError("Could not skip every selected role.");
+        setUndo((current) => current?.fn === notice.fn ? { ...current, error: "Could not skip every selected role." } : current);
+      },
+    ).finally(() => router.refresh());
+  };
+  const skipSelected = () => {
+    const jobs = skippableJobs(enriched.filter((e) => selected.has(e.job.url)).map((e) => e.job), scoreByUrl);
+    skipUrls(jobs, `Skipped ${jobs.length}`);
+  };
+
+  const keyActions = useRef({
+    save, skip, skipSelected, selectedSize: selected.size, visible, cursor, capped, orderedLength: ordered.length, scoreByUrl,
+  });
+  useLayoutEffect(() => {
+    keyActions.current = { save, skip, skipSelected, selectedSize: selected.size, visible, cursor, capped, orderedLength: ordered.length, scoreByUrl };
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      const typing = typingFromTarget(target instanceof Element ? {
+        tagName: target.tagName,
+        type: target instanceof HTMLInputElement ? target.type : undefined,
+        isContentEditable: target instanceof HTMLElement && target.isContentEditable,
+        closestDialog: Boolean(target.closest("dialog, [role='dialog']")),
+      } : null);
+      const current = keyActions.current;
+      const command = inboxCommand({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        typing,
+        composing: event.isComposing || event.key === "Process",
+        selected: current.selectedSize,
+        repeat: event.repeat,
+      });
+      if (!command) return;
+      if (command === "next" || command === "prev") {
+        event.preventDefault();
+        const delta = command === "next" ? 1 : -1;
+        if (command === "next" && current.capped && current.cursor >= current.visible.length - 1 && current.orderedLength > current.visible.length) {
+          setShowAll(true);
+          return;
+        }
+        setCursor((index) => moveCursor(index, current.visible.length, delta));
+        return;
+      }
+      if (command === "skip-selected") {
+        event.preventDefault();
+        current.skipSelected();
+        return;
+      }
+      // With no cursor yet, s or x only shows it on the first row. Acting on a
+      // row the user cannot see yet would save or skip it unseen.
+      if (current.cursor < 0) {
+        if (current.visible.length === 0) return;
+        event.preventDefault();
+        setCursor(0);
+        return;
+      }
+      const index = current.cursor;
+      const row = current.visible[index];
+      if (!row || inboxScoreTarget(current.scoreByUrl.get(row.job.url)).evaluated) return;
+      event.preventDefault();
+      if (command === "save") {
+        current.save(row.job);
+        setCursor(moveCursor(index, current.visible.length, 1));
+        return;
+      }
+      if (command === "skip") {
+        current.skip(row.job);
+        setCursor(cursorAfterRemoval(index, index));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const estimate = useMemo(() => {
     if (shortlist.length === 0) return {};
@@ -268,7 +396,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
   return (
     <div className={cn("mx-auto mt-4 max-w-3xl", shortlist.length > 0 && "pb-28 sm:pb-24")}>
-      {writeError && <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">{writeError}</p>}
+      {writeError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-400">{writeError}</p>}
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
       <FacetChips
@@ -287,7 +415,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         resultCount={filtered.length}
         totalCount={enriched.length - hiddenCount}
         anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
+        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); if (triageView) setTriageView(null); }}
       />
 
       {/* batch header: fresh slice by default, or the full filtered set */}
@@ -308,6 +436,20 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               Triage {untriaged} with AI
             </button>
           ) : null}
+          {(passUrls.length > 0 || triageView) && (
+            <button
+              type="button"
+              aria-pressed={triageView === "PASS"}
+              onClick={() => setTriageView(triageView === "PASS" ? null : "PASS")}
+              title="Show only the roles AI triage marked PASS. The link keeps the view."
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-xs font-medium max-sm:min-h-[44px]",
+                triageView === "PASS" ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:text-foreground",
+              )}
+            >
+              {triageView && triageView !== "PASS" ? `Triage ${triageView} · clear` : `Triage PASS${triageView === "PASS" ? " · clear" : ""}`}
+            </button>
+          )}
           {passUrls.length > 0 && (
             <button type="button" onClick={() => passUrls.forEach((j) => !isShortlisted(j.url) && save(j))} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
               Shortlist {passUrls.length} PASS
@@ -320,6 +462,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           </button>
         )}
       </div>
+      <p className="mt-1 text-xs text-faint">j and k move. s saves. x skips. Shift+X skips the checked rows.</p>
 
       {/* multi-select action bar */}
       {selected.size > 0 && (
@@ -327,6 +470,9 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           <span className="font-medium text-brand-text tabular-nums">{selected.size} selected</span>
           <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
             Save to shortlist
+          </button>
+          <button type="button" onClick={skipSelected} className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 max-sm:min-h-[44px]">
+            Skip selected
           </button>
           <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
             Clear
@@ -336,9 +482,11 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
       {visible.length > 0 ? (
         <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
-          {visible.map((e) => (
+          {visible.map((e, index) => (
             <TriageRow
               key={e.job.url}
+              index={index}
+              cursor={cursor === index}
               job={e.job}
               source={e.source}
               age={e.age}
@@ -352,10 +500,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
             />
           ))}
         </ul>
+      ) : triageView && !triageLoaded ? (
+        <p role="status" className="mt-3 text-sm text-muted">Loading triage results…</p>
       ) : (
         <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
           <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Loosen the filters to see more of your inbox.</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
+            {triageView ? `No inbox role has a ${triageView} triage verdict. Run Triage with AI, or clear the view.` : "Loosen the filters to see more of your inbox."}
+          </p>
         </div>
       )}
 
@@ -382,7 +534,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           <div className="inline-flex max-w-full flex-wrap items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-2 text-sm shadow-lg">
             <div className="min-w-0 flex-1 break-words">
               <span className="text-muted" role="status">{undo.label}</span>
-              {undo.error && <p role="alert" className="text-red-600 dark:text-red-400">{undo.error}</p>}
+              {undo.error && <p role="alert" className="text-red-700 dark:text-red-400">{undo.error}</p>}
             </div>
             <button type="button" onClick={() => void handleUndo(undo)} disabled={undo.busy} aria-busy={Boolean(undo.busy)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-text disabled:opacity-50 max-sm:min-h-[44px]">
               <Undo2 className="size-3.5" /> {undo.busy ? "Undoing…" : undo.error ? "Retry undo" : "Undo"}

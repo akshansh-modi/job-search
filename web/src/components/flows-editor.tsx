@@ -115,13 +115,13 @@ export function FlowsEditor() {
                     <button type="button" className="text-xs text-muted hover:text-brand-text max-sm:min-h-[44px]" onClick={() => update(t.kind, t.default)}>
                       Reset
                     </button>
-                    {saved === t.kind && <span className="text-xs text-emerald-700 dark:text-emerald-400">Saved</span>}
+                    {saved === t.kind && <span className="text-xs text-emerald-800 dark:text-emerald-400">Saved</span>}
                   </div>
                   {t.lockCli && (
                     <p className="mt-2 flex items-center gap-1 text-xs text-muted"><Lock className="size-3" /> {t.lockReason}</p>
                   )}
                   {offClaude && t.warn && (
-                    <p className="mt-2 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400"><TriangleAlert className="size-3" /> {t.warn}</p>
+                    <p className="mt-2 flex items-center gap-1 text-xs text-amber-800 dark:text-amber-400"><TriangleAlert className="size-3" /> {t.warn}</p>
                   )}
                 </div>
               );

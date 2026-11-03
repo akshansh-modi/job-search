@@ -93,10 +93,12 @@ const texEnv = () => ({ ...process.env, PATH: `${process.env.PATH ?? ""}:/Librar
 /**
  * Write, fact-gate, compile and check. Order matters: generate-latex.mjs cleans the
  * folder's build files after compiling, so it runs BEFORE the final pdflatex.
- * @param {{root: string, execPath: string, paths: LatexPaths, tex: string, onStatus?: (label: string) => void}} args
+ * `root` is the data root (output/, reports/); `coreRoot` is the code checkout the
+ * core scripts run from (resolveCodeRoot). They differ on a split-layout install.
+ * @param {{root: string, coreRoot?: string, execPath: string, paths: LatexPaths, tex: string, onStatus?: (label: string) => void}} args
  * @returns {Promise<{ok: boolean, error?: string, warnings: string[], pages?: number, pdf?: string}>}
  */
-export async function persistLatexCv({ root, execPath, paths, tex, onStatus = (_label) => {} }) {
+export async function persistLatexCv({ root, coreRoot = root, execPath, paths, tex, onStatus = (_label) => {} }) {
   const warnings = [];
   if (!/\\documentclass/.test(tex) || !/\\end\{document\}/.test(tex)) {
     return { ok: false, error: "The emitted .tex is incomplete (no \\documentclass or \\end{document}).", warnings };
@@ -105,7 +107,8 @@ export async function persistLatexCv({ root, execPath, paths, tex, onStatus = (_
   fs.writeFileSync(paths.tex, tex.endsWith("\n") ? tex : tex + "\n");
 
   onStatus("Fact-checking against cv.md…");
-  const gate = await run(execPath, ["generate-latex.mjs", paths.tex, paths.pdf, "--compile-only", "--source", paths.baseTex], { cwd: root, env: texEnv() });
+  // Scripts run from the checkout, as the CLI runs them; every path argument is absolute.
+  const gate = await run(execPath, [path.join(coreRoot, "generate-latex.mjs"), paths.tex, paths.pdf, "--compile-only", "--source", path.resolve(paths.baseTex)], { cwd: coreRoot, env: texEnv() });
   let report = null;
   try { report = JSON.parse(gate.stdout.slice(gate.stdout.indexOf("{"))); } catch { /* not JSON */ }
   const verdict = report?.factCheck?.verdict;
@@ -129,8 +132,70 @@ export async function persistLatexCv({ root, execPath, paths, tex, onStatus = (_
   const md = fs.readFileSync(paths.reportPath, "utf8");
   if (/^\*\*PDF:\*\*.*$/m.test(md)) fs.writeFileSync(paths.reportPath, md.replace(/^\*\*PDF:\*\*.*$/m, `**PDF:** ${rel}`));
   if (paths.reportNum && pages === 1) {
-    const mark = await run(execPath, ["mark-pdf-ready.mjs", paths.reportNum], { cwd: root });
+    const mark = await run(execPath, [path.join(coreRoot, "mark-pdf-ready.mjs"), paths.reportNum], { cwd: coreRoot });
     if (mark.code !== 0) warnings.push("Could not mark the tracker's PDF column — run mark-pdf-ready.mjs by hand.");
+    try { await registerLatexPdf({ root, coreRoot, reportNum: paths.reportNum, pdf: paths.pdf }); }
+    catch (e) { warnings.push(`Could not add the CV to data/pdf-index.tsv: ${String(e?.message ?? e).slice(0, 200)}`); }
   }
   return { ok: true, warnings, pages, pdf: rel };
+}
+
+/** Where persistLatexCv puts a CV: output/{company}/{role}/resume_{name}.pdf. */
+const LATEX_PDF_RE = /^output\/[^/]+\/[^/]+\/resume_[^/]+\.pdf$/;
+
+/**
+ * Root-relative path of this report's LaTeX CV, or null when it has none.
+ *
+ * An index row decides when there is one (`indexedPath`, absolute or
+ * root-relative): a LaTeX path there is the CV, and an HTML one means the user
+ * chose the HTML CV for this report. With no index row, the report's own
+ * `**PDF:**` line decides, which is how CVs built before the index existed are
+ * found. The file has to exist under output/.
+ *
+ * @param {{root: string, reportContent?: string | null, indexedPath?: string | null, exists?: (p: string) => boolean}} args
+ * @returns {string | null}
+ */
+export function latexCvPath({ root, reportContent = null, indexedPath = null, exists = fs.existsSync }) {
+  const toRel = (p) => {
+    const rel = path.relative(root, path.resolve(root, p)).split(path.sep).join("/");
+    return LATEX_PDF_RE.test(rel) && !rel.split("/").includes("..") && exists(path.join(root, rel)) ? rel : null;
+  };
+  if (indexedPath) return toRel(indexedPath);
+  const line = String(reportContent ?? "").match(/^\*\*PDF:\*\*[^\n]*?(output\/[^\s`)]+\.pdf)/m);
+  return line ? toRel(line[1]) : null;
+}
+
+/** Pure: index lines with this report's CV row replaced by one pointing at `relPdf`. */
+export function upsertPdfIndexRow(text, reportNum, relPdf, date) {
+  const n = Number(reportNum);
+  const kept = String(text ?? "").split(/\r?\n/).filter((l) => {
+    if (!l.trim() || l.startsWith("#")) return false;
+    const c = l.split("\t");
+    const kind = (c[5] ?? "").trim().toLowerCase() || "cv";
+    return !(/^\d+$/.test(c[0]?.trim() ?? "") && Number(c[0]) === n && kind === "cv");
+  });
+  kept.push([String(reportNum).padStart(3, "0"), relPdf, "", "latex", date, "cv"].join("\t"));
+  return "# report\tpdf\thtml\tformat\tdate\tkind - written by generate-pdf.mjs, do not edit\n" + kept.join("\n") + "\n";
+}
+
+/**
+ * Record a LaTeX CV in data/pdf-index.tsv, the file every "is there a CV for this
+ * report?" reader trusts (report page, apply flow, outcome.mjs). generate-pdf.mjs
+ * only indexes HTML-rendered PDFs, so without this a LaTeX CV under
+ * output/{company}/{role}/ reads as missing. Same path resolver, lock and atomic
+ * write as generate-pdf.mjs's updatePDFManifest, loaded from the checkout.
+ */
+export async function registerLatexPdf({ root, coreRoot = root, reportNum, pdf }) {
+  const { pathToFileURL } = await import("node:url");
+  const tu = await import(/* webpackIgnore: true */ pathToFileURL(path.join(coreRoot, "tracker-utils.mjs")).href);
+  const { withPipelineLock } = await import(/* webpackIgnore: true */ pathToFileURL(path.join(coreRoot, "pipeline-lock.mjs")).href);
+  const indexPath = tu.resolvePdfIndexPath(tu.resolveTrackerPath(root));
+  const relPdf = path.relative(root, path.resolve(pdf)).split(path.sep).join("/");
+  if (!relPdf.startsWith("output/")) throw new Error(`${relPdf} is not under output/`);
+  fs.mkdirSync(path.dirname(indexPath), { recursive: true });
+  await withPipelineLock(indexPath, () => {
+    const text = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : "";
+    tu.writeFileAtomic(indexPath, upsertPdfIndexRow(text, reportNum, relPdf, new Date().toISOString().slice(0, 10)));
+  });
+  return relPdf;
 }

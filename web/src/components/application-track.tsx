@@ -21,7 +21,7 @@ export function SavedContacts({ company, result }: { company: string; result: Co
         <Users className="size-4 text-faint" /> Saved contacts at {company}
       </h2>
       {!result.ok ? (
-        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{result.error}</p>
+        <p className="mt-2 text-sm text-red-700 dark:text-red-400">{result.error}</p>
       ) : result.contacts.length === 0 ? (
         <p className="mt-2 text-sm text-muted">
           No saved contact at this company in <code className="text-foreground">data/contacts.tsv</code>.
@@ -65,7 +65,7 @@ export function StatusHistory({ trackerNum, result }: { trackerNum: string; resu
         <span className="font-mono text-xs font-normal text-faint">tracker #{trackerNum}</span>
       </h2>
       {!result.ok ? (
-        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{result.error}</p>
+        <p className="mt-2 text-sm text-red-700 dark:text-red-400">{result.error}</p>
       ) : result.entries.length === 0 ? (
         <p className="mt-2 text-sm text-muted">
           No status change recorded in <code className="text-foreground">data/status-log.tsv</code> for this row yet.

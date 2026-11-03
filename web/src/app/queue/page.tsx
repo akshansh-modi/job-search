@@ -8,9 +8,9 @@ type Cmd = Awaited<ReturnType<typeof listCommands>>["commands"][number];
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—");
 
 const badge: Record<string, string> = {
-  queued: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  queued: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-400",
   running: "border-brand/40 bg-brand-soft text-brand-text",
-  done: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  done: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400",
   error: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400",
 };
 
@@ -55,7 +55,7 @@ export default async function QueuePage() {
       <h1 className="font-display text-3xl tracking-tight text-landing">Queue</h1>
       <p className="mt-2 text-sm text-muted">
         {isOnline() ? "Actions you take here run on your Mac within 5 minutes." : "Commands queued from the online app."}{" "}
-        <span className={workerOk ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}>
+        <span className={workerOk ? "text-emerald-800 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}>
           Mac worker last seen: {when(data.workerLastSeen)}
           {!workerOk && " — is your Mac awake and the worker installed?"}
         </span>
